@@ -17,9 +17,9 @@ builder.Services.AddAutoHttps(options =>
 });
 ```
 
-That is the whole setup. Kestrel is wired up automatically, the `http-01` challenge is answered from
-your own request pipeline, the certificate is written to disk so it survives a restart, and renewal
-happens on the schedule the certificate authority asks for.
+That is the whole setup. AutoHttps wires up Kestrel, answers the `http-01` challenge from your own
+request pipeline, writes the certificate to disk so it survives a restart, and renews on the
+schedule the certificate authority asks for.
 
 ---
 
