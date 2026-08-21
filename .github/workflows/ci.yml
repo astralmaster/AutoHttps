@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Build
+        run: dotnet build AutoHttps.slnx -c Release
+
+      # The suites are run one project at a time. Each test starts a Kestrel server and an ACME
+      # server of its own, and running every assembly at once starves the TLS handshakes the
+      # assertions depend on.
+      - name: Unit tests
+        run: dotnet test test/AutoHttps.Tests/AutoHttps.Tests.csproj -c Release --no-build
+
+      - name: Integration tests
+        run: dotnet test test/AutoHttps.IntegrationTests/AutoHttps.IntegrationTests.csproj -c Release --no-build
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Pack
+        run: dotnet pack src/AutoHttps/AutoHttps.csproj -c Release -o artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts/*.nupkg

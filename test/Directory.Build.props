@@ -1,0 +1,11 @@
+<Project>
+
+  <Import Project="../Directory.Build.props" />
+
+  <PropertyGroup>
+    <AnalysisMode>Default</AnalysisMode>
+    <NoWarn>$(NoWarn);CA1707;CA1861;CA2000;CA1861;CA1848;CA1515;CA5394;CA1054;CA1056;CA1034;CA1819;CA1002;CA1062;CA1031;CA1305;CA1310;CA1024;IDE0058</NoWarn>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

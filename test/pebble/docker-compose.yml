@@ -1,0 +1,40 @@
+# Brings up Let's Encrypt's own ACME test server so AutoHttps can be exercised against a real,
+# independent implementation of RFC 8555 rather than only against the test authority in this repo.
+#
+#   docker compose -f test/pebble/docker-compose.yml up -d
+#   dotnet test test/AutoHttps.PebbleTests
+#
+# Pebble resolves the domains under test through challtestsrv, which is pointed at the host so that
+# it reaches the Kestrel server the tests start. Adjust HOST_ADDRESS if your Docker host is not
+# reachable at the Docker Desktop default.
+
+services:
+  challtestsrv:
+    image: ghcr.io/letsencrypt/pebble-challtestsrv:latest
+    container_name: autohttps-challtestsrv
+    command: -defaultIPv6 ""
+    ports:
+      - "8055:8055"
+    networks:
+      - acme
+
+  pebble:
+    image: ghcr.io/letsencrypt/pebble:latest
+    container_name: autohttps-pebble
+    depends_on:
+      - challtestsrv
+    command: -config /test/config/pebble-config.json -dnsserver challtestsrv:8053
+    environment:
+      # Remove the random validation delay so the suite finishes quickly. Everything else is left at
+      # Pebble's defaults, including rejecting 5% of good nonces and reusing authorizations half the
+      # time, because that is the behaviour a client has to survive.
+      PEBBLE_VA_NOSLEEP: "1"
+    ports:
+      - "14000:14000"
+      - "15000:15000"
+    networks:
+      - acme
+
+networks:
+  acme:
+    name: autohttps-acme

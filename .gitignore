@@ -1,0 +1,13 @@
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+TestResults/
+*.nupkg
+*.snupkg
+.pebble/
+!test/docker/packages/.gitkeep

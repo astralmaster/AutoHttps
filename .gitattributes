@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.sln text eol=crlf
+*.slnx text eol=lf
+*.pem text eol=lf
+*.png binary
+*.nupkg binary

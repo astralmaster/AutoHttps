@@ -1,0 +1,30 @@
+# Runs the suite against Pebble, the ACME test server Let's Encrypt builds alongside Boulder, so
+# the client is checked against an implementation nobody here wrote. It is not part of the pull
+# request build because it needs Pebble to reach the runner over the Docker bridge.
+name: Pebble
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pebble:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Start Pebble
+        run: docker compose -f test/pebble/docker-compose.yml up -d
+
+      - name: Pebble tests
+        env:
+          AUTOHTTPS_HOST_ADDRESS: 172.17.0.1
+        run: dotnet test test/AutoHttps.PebbleTests/AutoHttps.PebbleTests.csproj -c Release
+
+      - name: Stop Pebble
+        if: always()
+        run: docker compose -f test/pebble/docker-compose.yml down
