@@ -38,7 +38,8 @@ Meanwhile the certificate world moved:
   September 2025. Authorities now tell clients *when* to renew, and expect to be asked.
 - **Certificate profiles** are how you opt into the shorter lifetimes.
 
-AutoHttps implements all three.
+AutoHttps implements all three. Moving an app off LettuceEncrypt? See
+[Migrating from LettuceEncrypt](MIGRATION.md).
 
 ## Installation
 
