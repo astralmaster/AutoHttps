@@ -50,6 +50,19 @@ internal sealed class CertificateAcquirer
 
             return await OrderAsync(identifiers, replacesCertificateId, cancellationToken);
         }
+        catch (AcmeException ex) when (replacesCertificateId is not null && ex.ErrorType == AcmeErrorTypes.AlreadyReplaced)
+        {
+            // The replaces field (RFC 9773) only tells the authority this is a renewal, so it can
+            // waive a rate limit. The authority has already accepted an order replacing this
+            // certificate and refuses a second one that names it. That happens when a previous
+            // renewal reached the authority but its result never became the certificate in hand, for
+            // example a restart between finalizing and persisting. Keeping the field would fail the
+            // same way on every attempt and the certificate would never renew. Ordering again without
+            // it still gets the certificate.
+            Log.CertificateAlreadyReplaced(_logger, ex.Detail ?? ex.Message);
+
+            return await OrderAsync(identifiers, replacesCertificateId: null, cancellationToken);
+        }
     }
 
     private async Task<CertificateMaterial> OrderAsync(

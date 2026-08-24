@@ -67,6 +67,12 @@ internal static partial class Log
         Message = "The certificate authority no longer recognises this account ({Detail}). Registering again with the stored account key.")]
     public static partial void AccountNoLongerRecognised(ILogger logger, string detail);
 
+    [LoggerMessage(
+        EventId = 128,
+        Level = LogLevel.Information,
+        Message = "The certificate authority has already replaced the certificate this renewal names ({Detail}). Ordering again without the replaces hint.")]
+    public static partial void CertificateAlreadyReplaced(ILogger logger, string detail);
+
     [LoggerMessage(EventId = 111, Level = LogLevel.Debug, Message = "Another instance holds the certificate lock for {Domains}; waiting for it to publish.")]
     public static partial void LockUnavailable(ILogger logger, string domains);
 

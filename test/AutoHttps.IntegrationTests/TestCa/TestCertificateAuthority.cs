@@ -39,6 +39,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     private readonly ConcurrentDictionary<string, TestAuthorization> _authorizations = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TestChallenge> _challenges = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TestIssuedCertificate> _certificates = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _replacedCertificateIds = new(StringComparer.Ordinal);
 
     private int _requestCount;
     private int _orderCount;
@@ -369,6 +370,19 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
                 StatusCodes.Status400BadRequest,
                 "urn:ietf:params:acme:error:invalidProfile",
                 $"Unknown profile '{profile}'.");
+            return;
+        }
+
+        // RFC 9773 section 5: a certificate may be named by the replaces field of only one order that
+        // is not invalid. A second order naming the same certificate is refused with 409 alreadyReplaced,
+        // which is the case a client that lost track of a renewal it already made has to recover from.
+        if (replaces is not null && !_replacedCertificateIds.TryAdd(replaces, 0))
+        {
+            await WriteProblemAsync(
+                context,
+                StatusCodes.Status409Conflict,
+                "urn:ietf:params:acme:error:alreadyReplaced",
+                $"The certificate '{replaces}' has already been marked as replaced.");
             return;
         }
 

@@ -5,7 +5,10 @@ using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
+using AutoHttps.Acme;
 using AutoHttps.Certificates;
+using AutoHttps.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace AutoHttps.PebbleTests;
@@ -166,6 +169,62 @@ public class PebbleIssuanceTests
             app.Log.CountOf(119) > 0,
             "Pebble never returned renewal information, so the certificate identifier was probably wrong:" +
             Environment.NewLine + app.Log.Describe());
+    }
+
+    [Fact]
+    public async Task RecoversWhenPebbleSaysTheCertificateWasAlreadyReplaced()
+    {
+        using var storage = new TempStorage();
+        string domain = NewDomain();
+
+        await using PebbleApplication app = await PebbleApplication.StartAsync(_pebble, options =>
+        {
+            options.DomainNames.Add(domain);
+            options.StorageDirectory = storage.Path;
+        });
+
+        await app.WaitForCertificateAsync(domain, Timeout);
+
+        // Drive the acquirer directly so the test controls which certificate each renewal names.
+        var acquirer = app.Services.GetRequiredService<CertificateAcquirer>();
+        string[] domains = [domain];
+
+        // A first certificate, then a renewal that names it. Pebble now treats the first certificate
+        // as replaced and rejects any later order that names it again with 409 alreadyReplaced.
+        CertificateMaterial first = await acquirer.AcquireAsync(domains, replacesCertificateId: null, CancellationToken.None);
+        string firstId = CertificateIdOf(first);
+        await acquirer.AcquireAsync(domains, firstId, CancellationToken.None);
+
+        // A process that lost the renewal it already made would try to replace the same certificate
+        // again. Against a certificate authority nobody here wrote, the client has to drop the
+        // replaces hint and still obtain a certificate.
+        CertificateMaterial recovered = await acquirer.AcquireAsync(domains, firstId, CancellationToken.None);
+
+        using X509Certificate2 leaf = X509Certificate2.CreateFromPem(recovered.CertificateChainPem);
+        Assert.Contains(domain, DnsNamesOf(leaf));
+
+        // Event 128 only fires on the recovery path, so seeing it proves Pebble really answered
+        // alreadyReplaced and that the drop-the-hint retry is what obtained this certificate.
+        Assert.True(
+            app.Log.CountOf(128) > 0,
+            "The recovery path never ran, so Pebble did not reject the stale replaces field as expected:" +
+            Environment.NewLine + app.Log.Describe());
+    }
+
+    private static string CertificateIdOf(CertificateMaterial material)
+    {
+        using X509Certificate2 leaf = X509Certificate2.CreateFromPem(material.CertificateChainPem);
+        return AcmeCertificateId.TryCompute(leaf, out string id)
+            ? id
+            : throw new InvalidOperationException("The issued certificate has no ACME renewal identifier.");
+    }
+
+    private static IEnumerable<string> DnsNamesOf(X509Certificate2 certificate)
+    {
+        X509Extension? extension = certificate.Extensions["2.5.29.17"];
+        return extension is null
+            ? []
+            : new X509SubjectAlternativeNameExtension(extension.RawData, extension.Critical).EnumerateDnsNames();
     }
 
     [Fact]

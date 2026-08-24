@@ -1,9 +1,14 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography.X509Certificates;
+using System.Threading;
 using System.Threading.Tasks;
 using AutoHttps.Certificates;
+using AutoHttps.Hosting;
 using AutoHttps.IntegrationTests.TestCa;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace AutoHttps.IntegrationTests;
@@ -173,6 +178,48 @@ public class RenewalAndPersistenceTests
         // RFC 9773 asks the client to name the certificate being replaced so the authority can grant
         // a renewal exemption from its rate limits.
         Assert.Equal(expectedId, replacement.Replaces);
+    }
+
+    [Fact]
+    public async Task RecoversWhenTheAuthoritySaysTheCertificateWasAlreadyReplaced()
+    {
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        await using TestApplication app = await TestApplication.StartAsync(authority, Configure(storage));
+
+        var acquirer = app.Services.GetRequiredService<CertificateAcquirer>();
+        string[] domains = ["renewed.example.com"];
+
+        // A first certificate, then a renewal that names it. The authority now treats the first
+        // certificate as replaced and will refuse any later order that names it again.
+        CertificateMaterial first = await acquirer.AcquireAsync(domains, replacesCertificateId: null, CancellationToken.None);
+        string firstId = CertificateIdOf(first);
+        await acquirer.AcquireAsync(domains, firstId, CancellationToken.None);
+
+        // A process killed between finalizing that renewal and writing it to disk comes back still
+        // holding the first certificate, so it tries to replace the same one again. The authority
+        // answers 409 alreadyReplaced. Naming the replaced certificate is only a rate-limit hint, so
+        // the client has to drop it and still obtain a certificate rather than retrying the doomed
+        // order until the certificate expires.
+        CertificateMaterial recovered = await acquirer.AcquireAsync(domains, firstId, CancellationToken.None);
+
+        using X509Certificate2 leaf = X509Certificate2.CreateFromPem(recovered.CertificateChainPem);
+        Assert.Contains("renewed.example.com", DnsNamesOf(leaf));
+        Assert.NotEqual(firstId, CertificateIdOf(recovered));
+    }
+
+    private static string CertificateIdOf(CertificateMaterial material)
+    {
+        using X509Certificate2 leaf = X509Certificate2.CreateFromPem(material.CertificateChainPem);
+        return TestCertificateAuthority.ComputeCertificateId(leaf);
+    }
+
+    private static IEnumerable<string> DnsNamesOf(X509Certificate2 certificate)
+    {
+        X509Extension? extension = certificate.Extensions["2.5.29.17"];
+        return extension is null
+            ? []
+            : new X509SubjectAlternativeNameExtension(extension.RawData, extension.Critical).EnumerateDnsNames();
     }
 
     [Fact]

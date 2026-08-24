@@ -41,6 +41,8 @@ internal sealed class PebbleApplication : IAsyncDisposable
 
     public LogCapture Log => _log;
 
+    public IServiceProvider Services => _app.Services;
+
     public static async Task<PebbleApplication> StartAsync(PebbleFixture pebble, Action<AutoHttpsOptions> configure)
     {
         // Pebble validates challenges on one fixed port, so every application in this suite competes
