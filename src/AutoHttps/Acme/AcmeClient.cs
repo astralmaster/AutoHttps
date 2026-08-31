@@ -14,6 +14,8 @@ internal sealed class AcmeClient
 {
     private const string PemChainContentType = "application/pem-certificate-chain";
 
+    private static readonly TimeSpan MaxPollDelay = TimeSpan.FromSeconds(30);
+
     private readonly AcmeHttpClient _http;
     private readonly AcmeKey _accountKey;
     private readonly ILogger _logger;
@@ -92,14 +94,6 @@ internal sealed class AcmeClient
         return new AcmeOrder(location, order);
     }
 
-    public async Task<AcmeOrderResource> GetOrderAsync(Uri orderUrl, CancellationToken cancellationToken)
-    {
-        AcmeResponse<AcmeOrderResource> response = await _http.PostAsGetAsync(
-            _accountKey, KeyId, orderUrl, AcmeJsonContext.Default.AcmeOrderResource, cancellationToken);
-
-        return response.Content ?? throw new AcmeException("The certificate authority returned an empty order.");
-    }
-
     public async Task<AcmeAuthorizationResource> GetAuthorizationAsync(Uri authorizationUrl, CancellationToken cancellationToken)
     {
         AcmeResponse<AcmeAuthorizationResource> response = await _http.PostAsGetAsync(
@@ -122,7 +116,10 @@ internal sealed class AcmeClient
 
         while (true)
         {
-            AcmeAuthorizationResource authorization = await GetAuthorizationAsync(authorizationUrl, cancellationToken);
+            AcmeResponse<AcmeAuthorizationResource> response = await _http.PostAsGetAsync(
+                _accountKey, KeyId, authorizationUrl, AcmeJsonContext.Default.AcmeAuthorizationResource, cancellationToken);
+            AcmeAuthorizationResource authorization = response.Content
+                ?? throw new AcmeException("The certificate authority returned an empty authorization.");
 
             switch (authorization.Status)
             {
@@ -149,7 +146,7 @@ internal sealed class AcmeClient
                     $"Timed out waiting for the certificate authority to validate '{authorization.Identifier?.Value}'.");
             }
 
-            await Task.Delay(pollInterval, _time, cancellationToken);
+            await Task.Delay(PollDelay(response.RetryAfter, pollInterval), _time, cancellationToken);
         }
     }
 
@@ -176,7 +173,10 @@ internal sealed class AcmeClient
 
         while (true)
         {
-            AcmeOrderResource order = await GetOrderAsync(orderUrl, cancellationToken);
+            AcmeResponse<AcmeOrderResource> response = await _http.PostAsGetAsync(
+                _accountKey, KeyId, orderUrl, AcmeJsonContext.Default.AcmeOrderResource, cancellationToken);
+            AcmeOrderResource order = response.Content
+                ?? throw new AcmeException("The certificate authority returned an empty order.");
 
             switch (order.Status)
             {
@@ -197,8 +197,28 @@ internal sealed class AcmeClient
                 throw new AcmeException("Timed out waiting for the certificate authority to issue the certificate.");
             }
 
-            await Task.Delay(pollInterval, _time, cancellationToken);
+            await Task.Delay(PollDelay(response.RetryAfter, pollInterval), _time, cancellationToken);
         }
+    }
+
+    // RFC 8555 section 7.5.1: while an order or authorization is still pending, the authority may
+    // return a Retry-After header saying how long to wait before asking again. Honour it, but never
+    // poll faster than the configured interval, and cap a single wait at MaxPollDelay so that a large
+    // value cannot hold the order open well past the validation timeout.
+    private TimeSpan PollDelay(DateTimeOffset? retryAfter, TimeSpan pollInterval)
+    {
+        if (retryAfter is not { } at)
+        {
+            return pollInterval;
+        }
+
+        TimeSpan requested = at - _time.GetUtcNow();
+        if (requested < pollInterval)
+        {
+            return pollInterval;
+        }
+
+        return requested > MaxPollDelay ? MaxPollDelay : requested;
     }
 
     public Task<string> DownloadCertificateAsync(Uri certificateUrl, CancellationToken cancellationToken) =>

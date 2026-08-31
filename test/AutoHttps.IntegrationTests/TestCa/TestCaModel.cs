@@ -151,6 +151,10 @@ internal sealed class TestCaBehavior
 
     public int PollsBeforeAuthorizationValid { get; set; }
 
+    /// <summary>The Retry-After the authority returns while an authorization it has been asked to
+    /// validate is still pending, as RFC 8555 section 7.5.1 allows, to pace the client's polling.</summary>
+    public TimeSpan? AuthorizationPollRetryAfter { get; set; }
+
     public bool FailValidation { get; set; }
 
     /// <summary>Registers the account and then fails the response, as a connection dropped after the

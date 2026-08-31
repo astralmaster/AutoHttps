@@ -374,8 +374,10 @@ the wrong certificate. Set `ServeFallbackCertificate = false` to turn this off.
 Certificate management never takes the application down. Failed orders are retried with exponential
 backoff between `InitialRetryDelay` and `MaxRetryDelay`; a store that cannot be written is logged and
 the certificate stays in use; an unexpected error is logged and retried. When the authority answers
-with a rate limit and a `Retry-After`, that instruction wins over the local backoff. The application
-keeps serving whatever certificate it already holds.
+with a rate limit and a `Retry-After`, that instruction wins over the local backoff. AutoHttps paces
+its polling the same way: while an order or authorization is still validating, it waits as long as a
+`Retry-After` on the poll asks for rather than checking on a fixed schedule. The application keeps
+serving whatever certificate it already holds.
 
 Log categories all begin with `AutoHttps` and event IDs are stable, so they are safe to alert on.
 Every event at `Information` and above is listed here; anything not in this table is `Debug` and

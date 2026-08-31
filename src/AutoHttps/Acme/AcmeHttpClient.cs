@@ -221,14 +221,15 @@ internal sealed class AcmeHttpClient
                 CaptureNonce(response);
                 string body = await response.Content.ReadAsStringAsync(cancellationToken);
 
+                DateTimeOffset? retryAfter = ParseRetryAfter(response);
+
                 if (response.IsSuccessStatusCode)
                 {
                     T? content = typeInfo is null || body.Length == 0 ? default : Deserialize(body, typeInfo);
-                    return new AcmeResponse<T>(response.StatusCode, content, response.Headers.Location, ParseLinks(response), body);
+                    return new AcmeResponse<T>(response.StatusCode, content, response.Headers.Location, ParseLinks(response), body, retryAfter);
                 }
 
                 AcmeProblem? problem = TryParseProblem(body);
-                DateTimeOffset? retryAfter = ParseRetryAfter(response);
 
                 if (attempt < MaxTransientRetries && ShouldRetry(response.StatusCode, problem))
                 {

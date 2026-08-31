@@ -345,6 +345,42 @@ public class CertificateIssuanceTests
     }
 
     [Fact]
+    public async Task WaitsAsLongAsTheAuthorityAsksBetweenAuthorizationPolls()
+    {
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        authority.Behavior.PollsBeforeAuthorizationValid = 1;
+        authority.Behavior.AuthorizationPollRetryAfter = TimeSpan.FromSeconds(4);
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+        });
+
+        await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+
+        var polls = authority.AuthorizationPollTimes;
+        Assert.True(polls.Count >= 2, $"Expected at least two authorization polls, saw {polls.Count}.");
+
+        // The poll interval in these tests is 100ms. Retry-After has to override it, so the gap
+        // between the pending poll and the one after it lands near the four seconds asked for.
+        TimeSpan longestGap = TimeSpan.Zero;
+        for (int i = 1; i < polls.Count; i++)
+        {
+            TimeSpan gap = polls[i] - polls[i - 1];
+            if (gap > longestGap)
+            {
+                longestGap = gap;
+            }
+        }
+
+        Assert.True(
+            longestGap >= TimeSpan.FromSeconds(3.5),
+            $"Expected a poll to honour Retry-After, but the longest gap was {longestGap}.");
+    }
+
+    [Fact]
     public async Task RegistersWithAnExternalAccountBindingWhenTheAuthorityRequiresOne()
     {
         using var storage = new TempStorage();

@@ -45,6 +45,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     private int _orderCount;
     private int _orderAttempts;
     private readonly ConcurrentQueue<DateTimeOffset> _orderAttemptTimes = new();
+    private readonly ConcurrentQueue<DateTimeOffset> _authorizationPollTimes = new();
 
     private Uri _baseAddress = new("http://127.0.0.1/");
 
@@ -78,6 +79,9 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     public int OrderAttempts => Volatile.Read(ref _orderAttempts);
 
     public IReadOnlyList<DateTimeOffset> OrderAttemptTimes => _orderAttemptTimes.ToArray();
+
+    /// <summary>When each poll of an authorization arrived, for asserting the client's poll cadence.</summary>
+    public IReadOnlyList<DateTimeOffset> AuthorizationPollTimes => _authorizationPollTimes.ToArray();
 
     public int AccountCount => _accounts.Count;
 
@@ -471,7 +475,19 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
             return;
         }
 
+        _authorizationPollTimes.Enqueue(DateTimeOffset.UtcNow);
         AdvanceAuthorization(authorization);
+
+        // A pending authorization the client has already asked to validate is exactly where a real
+        // authority paces polling with Retry-After. The initial pre-challenge read carries no such
+        // attempt, so it is left alone.
+        if (Behavior.AuthorizationPollRetryAfter is { } retryAfter &&
+            authorization.Status == "pending" &&
+            authorization.ValidationAttempted)
+        {
+            context.Response.Headers.RetryAfter = ((int)retryAfter.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+        }
+
         await WriteJsonAsync(context, StatusCodes.Status200OK, SerializeAuthorization(authorization));
     }
 
