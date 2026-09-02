@@ -27,6 +27,9 @@ internal sealed class AutoHttpsService : BackgroundService
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<AutoHttpsService> _logger;
     private readonly TimeProvider _time;
+    private readonly AutoHttpsState _state;
+    private readonly CertificateEventPublisher _events;
+    private readonly AutoHttpsMetrics _metrics;
 
     private ServerCertificate? _current;
     private DateTimeOffset _loggedRenewal;
@@ -42,7 +45,10 @@ internal sealed class AutoHttpsService : BackgroundService
         IDistributedLock distributedLock,
         IHostApplicationLifetime lifetime,
         ILogger<AutoHttpsService> logger,
-        TimeProvider time)
+        TimeProvider time,
+        AutoHttpsState state,
+        CertificateEventPublisher events,
+        AutoHttpsMetrics metrics)
     {
         _options = options.Value;
         _acquirer = acquirer;
@@ -52,6 +58,9 @@ internal sealed class AutoHttpsService : BackgroundService
         _lifetime = lifetime;
         _logger = logger;
         _time = time;
+        _state = state;
+        _events = events;
+        _metrics = metrics;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -64,6 +73,8 @@ internal sealed class AutoHttpsService : BackgroundService
 
         string storeName = StoreKey.ForCertificate(_options.CertificateAuthority, domains);
         string description = string.Join(", ", domains);
+
+        _state.SetDomains(domains);
 
         if (_options.ServeFallbackCertificate)
         {
@@ -170,6 +181,8 @@ internal sealed class AutoHttpsService : BackgroundService
                 return AcquisitionOutcome.Acquired;
             }
 
+            bool renewing = _current is not null;
+
             try
             {
                 string? replaces = TryGetCertificateId(_current);
@@ -185,6 +198,11 @@ internal sealed class AutoHttpsService : BackgroundService
 
                 Publish(certificate);
                 Log.CertificateIssued(_logger, description, certificate.NotAfter);
+                _metrics.RecordSuccess();
+                await NotifyChangedAsync(
+                    certificate,
+                    renewing ? CertificateChangeReason.Renewed : CertificateChangeReason.Issued,
+                    cancellationToken);
 
                 return AcquisitionOutcome.Acquired;
             }
@@ -204,12 +222,14 @@ internal sealed class AutoHttpsService : BackgroundService
 
                 Log.OrderFailed(_logger, description, Describe(ex), _nextRetry);
                 Log.OrderFailedDetail(_logger, description, ex);
+                await ReportFailureAsync(ex, cancellationToken);
                 return AcquisitionOutcome.Failed;
             }
             catch (Exception ex)
             {
                 Log.OrderFailed(_logger, description, Describe(ex), _nextRetry);
                 Log.OrderFailedDetail(_logger, description, ex);
+                await ReportFailureAsync(ex, cancellationToken);
                 return AcquisitionOutcome.Failed;
             }
         }
@@ -338,9 +358,12 @@ internal sealed class AutoHttpsService : BackgroundService
         if (announce)
         {
             Log.CertificateAdopted(_logger, subjects);
+            await NotifyChangedAsync(candidate, CertificateChangeReason.Adopted, cancellationToken);
         }
         else
         {
+            // A certificate this instance loaded from its own store at startup is what it was already
+            // serving, so it is not reported as a change; only the state readers are updated.
             Log.CertificateLoaded(_logger, subjects, candidate.NotAfter);
         }
 
@@ -361,13 +384,45 @@ internal sealed class AutoHttpsService : BackgroundService
 
     private void Publish(ServerCertificate certificate)
     {
+        // Update the read model before handing the certificate to the selector. The selector's
+        // publish is a full barrier, so a reader that sees the new certificate there is guaranteed to
+        // also see the matching state, never a certificate the inspector does not yet know about.
         _current = certificate;
+        _state.CertificatePublished(certificate);
         _selector.Publish(certificate);
         _loggedRenewal = default;
     }
 
+    private Task NotifyChangedAsync(
+        ServerCertificate certificate,
+        CertificateChangeReason reason,
+        CancellationToken cancellationToken)
+    {
+        var context = new CertificateChangedContext(
+            _state.Current.Domains,
+            certificate.SubjectNames,
+            certificate.NotBefore,
+            certificate.NotAfter,
+            certificate.Leaf.Thumbprint,
+            reason);
+
+        return _events.NotifyChangedAsync(context, cancellationToken);
+    }
+
+    private Task ReportFailureAsync(Exception exception, CancellationToken cancellationToken)
+    {
+        string reason = Describe(exception);
+        _state.OrderFailed(_time.GetUtcNow(), reason);
+        _metrics.RecordFailure();
+
+        var context = new CertificateFailedContext(_state.Current.Domains, reason, exception);
+        return _events.NotifyFailedAsync(context, cancellationToken);
+    }
+
     private void LogSchedule(string description, DateTimeOffset renewAt)
     {
+        _state.RenewalScheduled(renewAt);
+
         if (_loggedRenewal == renewAt)
         {
             return;

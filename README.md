@@ -74,6 +74,7 @@ Core shared framework, including a complete RFC 8555 client written for this lib
 | **External account binding** | Yes, required by ZeroSSL and Google Trust Services |
 | **Keys** | ECDSA P-256 (default), P-384, RSA 2048/3072/4096 |
 | **Multiple instances** | Locked and shared through the certificate store |
+| **Observability** | Health check, metrics, and callbacks on change and failure |
 | **Dependencies** | None |
 
 ## Configuration
@@ -401,11 +402,12 @@ exists for diagnosis, not alerting.
 | 125 | Warning | The authority stopped recognising the account, so it is being registered again. |
 | 126 | Warning | A certificate is being served without its intermediates. See "Sending the full chain". |
 | 127 | Warning | A challenge failed and nothing ever requested the response from this process. The message names the cause the authority reported: a name that did not resolve, a connection it could not make, or something in front of the application answering the challenge path. |
+| 129 | Warning | A certificate listener threw. The certificate is unaffected and in use. |
 | 122 | Error | Something unexpected went wrong, including a storage directory that cannot be written. The application keeps running. |
 
-If you alert on one thing, alert on **110** and **122**. There is no health endpoint or metrics
-surface yet, so a certificate expiry monitor pointed at your own domain remains the honest
-backstop.
+If you alert on one thing, alert on **110** and **122**. For a readiness signal and certificate
+metrics, see [Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes). A
+certificate expiry monitor pointed at your own domain is still a good external backstop.
 
 AutoHttps reaches the authority through a named `HttpClient`, and `IHttpClientFactory` logs every
 request at Information under `System.Net.Http.HttpClient.AutoHttps.Acme`. If that is noisier than
@@ -413,6 +415,75 @@ you want, turn it down without affecting AutoHttps' own logging:
 
 ```json
 { "Logging": { "LogLevel": { "System.Net.Http.HttpClient.AutoHttps.Acme": "Warning" } } }
+```
+
+## Health, metrics and reacting to changes
+
+Four ways to see what AutoHttps is doing and act on it. None of them adds a dependency.
+
+### A health check
+
+Register a health check that reports on the certificate being served:
+
+```csharp
+builder.Services.AddHealthChecks().AddAutoHttps();
+```
+
+It is healthy while a certificate from the authority is in use, unhealthy once that certificate has
+expired, and Degraded before the first one is obtained, when a self-signed fallback is serving in the
+meantime. The check is tagged `ready`, so a readiness probe picks it up while a liveness probe leaves
+it alone. To keep an instance out of a load balancer until a real certificate is in place, make the
+missing case a hard failure instead:
+
+```csharp
+builder.Services.AddHealthChecks()
+    .AddAutoHttps(missingCertificateStatus: HealthStatus.Unhealthy);
+```
+
+Pass `nearExpiryWarning` to report Degraded once a certificate has less than a given time left. It is
+off by default: a threshold that suits a 90 day certificate is wrong for a six day one.
+
+### Metrics
+
+AutoHttps publishes two instruments through a meter named `AutoHttps`, the value of
+`AutoHttpsDefaults.MeterName`:
+
+- `autohttps.certificate.expiry`, seconds until the current certificate expires, and negative once it
+  has. Nothing is reported until the first certificate exists.
+- `autohttps.certificate.renewals`, a count of the orders this instance completed, tagged
+  `outcome=success` or `outcome=failure`.
+
+Subscribe to the meter with OpenTelemetry or a `MeterListener`. The instruments cost nothing until
+something is listening.
+
+### Reacting to a new certificate
+
+To reload a proxy, copy the certificate elsewhere, warm a cache or notify an operator, implement
+`IAutoHttpsCertificateListener` and register it:
+
+```csharp
+builder.Services.AddAutoHttps(options => { /* ... */ })
+    .AddCertificateListener<ReloadTheProxy>();
+```
+
+`OnCertificateChangedAsync` runs after a new certificate has been saved and is being served, and only
+when the served certificate has actually changed, so the reload happens when there is something new
+to load rather than on every renewal check. `OnCertificateFailedAsync` runs after an order fails,
+which is where a "notify on failure" hook goes. Both are awaited on the renewal loop, so keep them
+quick; a listener that throws is logged as event 129 and cannot affect the certificate, which is
+already in use by the time a change is reported.
+
+### Reading the current certificate
+
+Inject `IAutoHttpsCertificateInspector` to read what is being served from your own code, for a status
+page or a diagnostic endpoint:
+
+```csharp
+app.MapGet("/tls", (IAutoHttpsCertificateInspector inspector) =>
+{
+    AutoHttpsCertificateStatus status = inspector.GetStatus();
+    return Results.Ok(new { status.HasCertificate, status.SubjectNames, status.NotAfter, status.RenewalScheduledAt });
+});
 ```
 
 ## Not in scope

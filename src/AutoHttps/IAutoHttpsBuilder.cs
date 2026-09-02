@@ -37,6 +37,22 @@ public interface IAutoHttpsBuilder
     /// <returns>The builder.</returns>
     IAutoHttpsBuilder UseDnsChallengeProvider<TProvider>()
         where TProvider : class, IDnsChallengeProvider;
+
+    /// <summary>
+    /// Registers a listener notified when the served certificate changes or an order fails. Several
+    /// may be registered; they are called in registration order.
+    /// </summary>
+    /// <typeparam name="TListener">The listener implementation.</typeparam>
+    /// <returns>The builder.</returns>
+    IAutoHttpsBuilder AddCertificateListener<TListener>()
+        where TListener : class, IAutoHttpsCertificateListener;
+
+    /// <summary>
+    /// Registers a listener instance notified when the served certificate changes or an order fails.
+    /// </summary>
+    /// <param name="listener">The listener.</param>
+    /// <returns>The builder.</returns>
+    IAutoHttpsBuilder AddCertificateListener(IAutoHttpsCertificateListener listener);
 }
 
 internal sealed class AutoHttpsBuilder : IAutoHttpsBuilder
@@ -70,6 +86,20 @@ internal sealed class AutoHttpsBuilder : IAutoHttpsBuilder
         where TProvider : class, IDnsChallengeProvider
     {
         Services.Replace(ServiceDescriptor.Singleton<IDnsChallengeProvider, TProvider>());
+        return this;
+    }
+
+    public IAutoHttpsBuilder AddCertificateListener<TListener>()
+        where TListener : class, IAutoHttpsCertificateListener
+    {
+        Services.TryAddEnumerable(ServiceDescriptor.Singleton<IAutoHttpsCertificateListener, TListener>());
+        return this;
+    }
+
+    public IAutoHttpsBuilder AddCertificateListener(IAutoHttpsCertificateListener listener)
+    {
+        ArgumentNullException.ThrowIfNull(listener);
+        Services.TryAddEnumerable(ServiceDescriptor.Singleton(listener));
         return this;
     }
 }

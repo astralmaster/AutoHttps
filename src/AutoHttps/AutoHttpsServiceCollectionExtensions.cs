@@ -76,6 +76,14 @@ public static class AutoHttpsServiceCollectionExtensions
         services.TryAddSingleton<AcmeSession>();
         services.TryAddSingleton<CertificateAcquirer>();
 
+        // The instruments are inert until something subscribes, so registering AddMetrics only
+        // guarantees the IMeterFactory the meter needs is present even under a slim host builder.
+        services.AddMetrics();
+        services.TryAddSingleton<AutoHttpsState>();
+        services.TryAddSingleton<AutoHttpsMetrics>();
+        services.TryAddSingleton<CertificateEventPublisher>();
+        services.TryAddSingleton<IAutoHttpsCertificateInspector, AutoHttpsCertificateInspector>();
+
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IChallengeHandler, Http01ChallengeHandler>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IChallengeHandler, Dns01ChallengeHandler>());
 

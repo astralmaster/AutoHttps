@@ -23,6 +23,9 @@ builder.Services.AddAutoHttps(options =>
     options.StorageDirectory = builder.Configuration["StorageDirectory"];
 });
 
+// A readiness signal that turns healthy once a real certificate is being served.
+builder.Services.AddHealthChecks().AddAutoHttps();
+
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
     // Port 80 has to stay reachable: it is where the certificate authority looks for the
@@ -35,5 +38,19 @@ WebApplication app = builder.Build();
 
 app.MapGet("/", (HttpContext context) =>
     $"Served over {context.Request.Protocol} to {context.Request.Host}. Secure: {context.Request.IsHttps}.");
+
+app.MapHealthChecks("/health");
+
+app.MapGet("/tls", (IAutoHttpsCertificateInspector inspector) =>
+{
+    AutoHttpsCertificateStatus status = inspector.GetStatus();
+    return Results.Ok(new
+    {
+        status.HasCertificate,
+        status.SubjectNames,
+        status.NotAfter,
+        status.RenewalScheduledAt,
+    });
+});
 
 app.Run();

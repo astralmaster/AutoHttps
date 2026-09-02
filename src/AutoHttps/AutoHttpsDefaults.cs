@@ -10,4 +10,11 @@ public static class AutoHttpsDefaults
     /// authority. Configure it to route ACME traffic through a proxy or to add handlers.
     /// </summary>
     public const string HttpClientName = "AutoHttps.Acme";
+
+    /// <summary>
+    /// The name of the <see cref="System.Diagnostics.Metrics.Meter"/> AutoHttps publishes its
+    /// instruments through. Subscribe to it with OpenTelemetry or a
+    /// <see cref="System.Diagnostics.Metrics.MeterListener"/>.
+    /// </summary>
+    public const string MeterName = "AutoHttps";
 }

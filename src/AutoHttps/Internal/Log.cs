@@ -123,4 +123,10 @@ internal static partial class Log
                   "Holding off for {Delay} to avoid exhausting the certificate authority's rate limits. " +
                   "Check RenewalThreshold against the lifetime the authority issues.")]
     public static partial void RenewalThrottled(ILogger logger, string domains, TimeSpan delay);
+
+    [LoggerMessage(
+        EventId = 129,
+        Level = LogLevel.Warning,
+        Message = "A certificate listener ({Listener}) threw. The certificate is unaffected and in use.")]
+    public static partial void CertificateListenerFailed(ILogger logger, string listener, Exception exception);
 }
