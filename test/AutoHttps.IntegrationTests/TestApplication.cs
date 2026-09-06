@@ -64,16 +64,18 @@ internal sealed class TestApplication : IAsyncDisposable
         Action<IServiceCollection>? configureServices = null,
         bool enableHttpsRedirection = false,
         bool manualChallengeMiddleware = false,
-        bool tuneHandshakeTimeout = true)
+        bool tuneHandshakeTimeout = true,
+        string environment = "Production",
+        Action<IAutoHttpsBuilder>? configureBuilder = null)
     {
-        var builder = WebApplication.CreateSlimBuilder();
+        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { EnvironmentName = environment });
         builder.Logging.ClearProviders();
         builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
         var capture = new LogCapture();
         builder.Logging.AddProvider(capture);
 
-        builder.Services.AddAutoHttps(options =>
+        IAutoHttpsBuilder autoHttps = builder.Services.AddAutoHttps(options =>
         {
             options.CertificateAuthority = authority.DirectoryUri;
             options.EmailAddress = "operator@example.com";
@@ -86,6 +88,8 @@ internal sealed class TestApplication : IAsyncDisposable
             options.ConfigureKestrel = integration == KestrelIntegration.HttpsDefaults;
             configure(options);
         });
+
+        configureBuilder?.Invoke(autoHttps);
 
         if (enableHttpsRedirection)
         {

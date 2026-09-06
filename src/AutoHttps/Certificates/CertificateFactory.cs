@@ -15,7 +15,7 @@ internal static class CertificateFactory
     // Schannel rejects ephemeral keys for server authentication, so on Windows the key has to be
     // persisted for the lifetime of the certificate object. Everywhere else an ephemeral key
     // avoids writing key material to disk.
-    private static readonly X509KeyStorageFlags StorageFlags = OperatingSystem.IsWindows()
+    internal static readonly X509KeyStorageFlags StorageFlags = OperatingSystem.IsWindows()
         ? X509KeyStorageFlags.Exportable
         : X509KeyStorageFlags.Exportable | X509KeyStorageFlags.EphemeralKeySet;
 

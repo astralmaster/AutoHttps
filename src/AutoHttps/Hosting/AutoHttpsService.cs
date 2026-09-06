@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using AutoHttps.Acme;
@@ -30,6 +31,8 @@ internal sealed class AutoHttpsService : BackgroundService
     private readonly AutoHttpsState _state;
     private readonly CertificateEventPublisher _events;
     private readonly AutoHttpsMetrics _metrics;
+    private readonly IHostEnvironment _environment;
+    private readonly DevelopmentCertificateSource _developmentCertificate;
 
     private ServerCertificate? _current;
     private DateTimeOffset _loggedRenewal;
@@ -48,19 +51,23 @@ internal sealed class AutoHttpsService : BackgroundService
         TimeProvider time,
         AutoHttpsState state,
         CertificateEventPublisher events,
-        AutoHttpsMetrics metrics)
+        AutoHttpsMetrics metrics,
+        IHostEnvironment environment,
+        DevelopmentCertificateSource developmentCertificate)
     {
         _options = options.Value;
         _acquirer = acquirer;
         _selector = selector;
         _store = store;
-        _lock = distributedLock;
         _lifetime = lifetime;
+        _lock = distributedLock;
         _logger = logger;
         _time = time;
         _state = state;
         _events = events;
         _metrics = metrics;
+        _environment = environment;
+        _developmentCertificate = developmentCertificate;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -79,6 +86,12 @@ internal sealed class AutoHttpsService : BackgroundService
         if (_options.ServeFallbackCertificate)
         {
             _selector.SetFallbackNames(domains);
+        }
+
+        if (_developmentCertificate.IsEnabled && _environment.IsDevelopment())
+        {
+            ServeDevelopmentCertificate(description);
+            return;
         }
 
         Log.ServiceStarting(_logger, description);
@@ -380,6 +393,21 @@ internal sealed class AutoHttpsService : BackgroundService
         {
             Log.StoreWriteFailed(_logger, ex);
         }
+    }
+
+    private void ServeDevelopmentCertificate(string description)
+    {
+        X509Certificate2? leaf = _developmentCertificate.Resolve(_time.GetUtcNow());
+        if (leaf is null)
+        {
+            // Only the ASP.NET Core development certificate can be missing here; a supplied one or a
+            // file would have thrown. The self-signed fallback keeps the app serving in the meantime.
+            Log.DevelopmentCertificateMissing(_logger);
+            return;
+        }
+
+        Publish(new ServerCertificate(leaf, new X509Certificate2Collection()));
+        Log.DevelopmentCertificateServed(_logger, _developmentCertificate.Description, description);
     }
 
     private void Publish(ServerCertificate certificate)

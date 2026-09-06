@@ -129,4 +129,17 @@ internal static partial class Log
         Level = LogLevel.Warning,
         Message = "A certificate listener ({Listener}) threw. The certificate is unaffected and in use.")]
     public static partial void CertificateListenerFailed(ILogger logger, string listener, Exception exception);
+
+    [LoggerMessage(
+        EventId = 130,
+        Level = LogLevel.Information,
+        Message = "Development environment: serving the {Source} certificate for {Domains} and not contacting an authority.")]
+    public static partial void DevelopmentCertificateServed(ILogger logger, string source, string domains);
+
+    [LoggerMessage(
+        EventId = 131,
+        Level = LogLevel.Warning,
+        Message = "Development environment: no ASP.NET Core development certificate is installed. " +
+                  "Run 'dotnet dev-certs https --trust', then restart. Serving the self-signed fallback until then.")]
+    public static partial void DevelopmentCertificateMissing(ILogger logger);
 }

@@ -1,4 +1,6 @@
 using System;
+using System.Security.Cryptography.X509Certificates;
+using AutoHttps.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -53,6 +55,32 @@ public interface IAutoHttpsBuilder
     /// <param name="listener">The listener.</param>
     /// <returns>The builder.</returns>
     IAutoHttpsBuilder AddCertificateListener(IAutoHttpsCertificateListener listener);
+
+    /// <summary>
+    /// In the Development environment, serve the ASP.NET Core HTTPS development certificate on
+    /// localhost instead of ordering one over ACME. Run <c>dotnet dev-certs https --trust</c> once so
+    /// the browser trusts it. Outside Development this call is ignored and the normal ACME path runs.
+    /// </summary>
+    /// <returns>The builder.</returns>
+    IAutoHttpsBuilder UseDevelopmentCertificate();
+
+    /// <summary>
+    /// In the Development environment, serve the certificate in a PKCS#12 file instead of ordering one
+    /// over ACME. This is the file <c>mkcert -pkcs12</c> produces, which lets a real hostname be used
+    /// locally with a trusted certificate. Outside Development this call is ignored.
+    /// </summary>
+    /// <param name="certificatePath">Path to a PKCS#12 (<c>.pfx</c> or <c>.p12</c>) file.</param>
+    /// <param name="password">The file's password, or <see langword="null"/> when it has none.</param>
+    /// <returns>The builder.</returns>
+    IAutoHttpsBuilder UseDevelopmentCertificate(string certificatePath, string? password = null);
+
+    /// <summary>
+    /// In the Development environment, serve the given certificate instead of ordering one over ACME.
+    /// Outside Development this call is ignored. AutoHttps takes ownership of the certificate.
+    /// </summary>
+    /// <param name="certificate">The certificate to serve, which must carry its private key.</param>
+    /// <returns>The builder.</returns>
+    IAutoHttpsBuilder UseDevelopmentCertificate(X509Certificate2 certificate);
 }
 
 internal sealed class AutoHttpsBuilder : IAutoHttpsBuilder
@@ -100,6 +128,27 @@ internal sealed class AutoHttpsBuilder : IAutoHttpsBuilder
     {
         ArgumentNullException.ThrowIfNull(listener);
         Services.TryAddEnumerable(ServiceDescriptor.Singleton(listener));
+        return this;
+    }
+
+    public IAutoHttpsBuilder UseDevelopmentCertificate() =>
+        UseDevelopmentCertificate(DevelopmentCertificateSource.AspNetDevelopmentCertificate());
+
+    public IAutoHttpsBuilder UseDevelopmentCertificate(string certificatePath, string? password = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(certificatePath);
+        return UseDevelopmentCertificate(DevelopmentCertificateSource.FromFile(certificatePath, password));
+    }
+
+    public IAutoHttpsBuilder UseDevelopmentCertificate(X509Certificate2 certificate)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+        return UseDevelopmentCertificate(DevelopmentCertificateSource.FromCertificate(certificate));
+    }
+
+    private AutoHttpsBuilder UseDevelopmentCertificate(DevelopmentCertificateSource source)
+    {
+        Services.Replace(ServiceDescriptor.Singleton(source));
         return this;
     }
 }

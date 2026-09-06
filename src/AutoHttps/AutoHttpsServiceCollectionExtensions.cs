@@ -84,6 +84,9 @@ public static class AutoHttpsServiceCollectionExtensions
         services.TryAddSingleton<CertificateEventPublisher>();
         services.TryAddSingleton<IAutoHttpsCertificateInspector, AutoHttpsCertificateInspector>();
 
+        // Replaced by UseDevelopmentCertificate; disabled unless that is called.
+        services.TryAddSingleton(DevelopmentCertificateSource.Disabled);
+
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IChallengeHandler, Http01ChallengeHandler>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IChallengeHandler, Dns01ChallengeHandler>());
 

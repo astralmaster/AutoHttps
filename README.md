@@ -370,6 +370,33 @@ configured domains during that window, so TLS clients see a certificate warning 
 connection failure. Requests for names you have not configured are refused rather than answered with
 the wrong certificate. Set `ServeFallbackCertificate = false` to turn this off.
 
+## Local development
+
+ACME cannot reach a developer machine, so there is nothing for AutoHttps to order locally. In the
+Development environment, tell it to serve a locally trusted certificate instead:
+
+```csharp
+builder.Services.AddAutoHttps(options => { /* ... */ })
+    .UseDevelopmentCertificate();
+```
+
+With no argument it serves the ASP.NET Core development certificate on localhost. Run
+`dotnet dev-certs https --trust` once so the browser trusts it. Outside Development the call is
+ignored and the normal ACME path runs, so the same code works in both places.
+
+To develop against a real hostname, point it at a certificate made with mkcert:
+
+```csharp
+// mkcert -install ; mkcert -pkcs12 myapp.local ; then add "127.0.0.1 myapp.local" to your hosts file
+builder.Services.AddAutoHttps(options => options.DomainNames.Add("myapp.local"))
+    .UseDevelopmentCertificate("myapp.local.p12", "changeit");
+```
+
+A third overload takes an `X509Certificate2` you loaded yourself. AutoHttps does not install a
+certificate authority into your trust store; that is the job of `dotnet dev-certs https --trust` or
+`mkcert -install`, which you run once. If the development certificate is asked for but not installed,
+AutoHttps logs event 131 and serves the self-signed fallback so the app still starts.
+
 ## Failure behaviour
 
 Certificate management never takes the application down. Failed orders are retried with exponential
@@ -392,6 +419,7 @@ exists for diagnosis, not alerting.
 | 109 | Information | When the current certificate will be renewed. |
 | 116 | Information | The service started and is managing these domains. |
 | 120 | Information | A certificate published by another instance was picked up. |
+| 130 | Information | A development certificate is being served and ACME is disabled in this environment. |
 | 110 | Warning | An order failed and will be retried. The reason is in the message; the stack trace is logged separately at Debug as event 124. |
 | 112 | Warning | A self-signed fallback is being served, logged once rather than per handshake. |
 | 114 | Warning | The store could not be read; continuing without a cached certificate. |
@@ -403,6 +431,7 @@ exists for diagnosis, not alerting.
 | 126 | Warning | A certificate is being served without its intermediates. See "Sending the full chain". |
 | 127 | Warning | A challenge failed and nothing ever requested the response from this process. The message names the cause the authority reported: a name that did not resolve, a connection it could not make, or something in front of the application answering the challenge path. |
 | 129 | Warning | A certificate listener threw. The certificate is unaffected and in use. |
+| 131 | Warning | A development certificate was asked for but none is installed. Run `dotnet dev-certs https --trust`. The self-signed fallback is served meanwhile. |
 | 122 | Error | Something unexpected went wrong, including a storage directory that cannot be written. The application keeps running. |
 
 If you alert on one thing, alert on **110** and **122**. For a readiness signal and certificate
