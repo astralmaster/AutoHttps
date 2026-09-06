@@ -478,7 +478,8 @@ AutoHttps publishes two instruments through a meter named `AutoHttps`, the value
 `AutoHttpsDefaults.MeterName`:
 
 - `autohttps.certificate.expiry`, seconds until the current certificate expires, and negative once it
-  has. Nothing is reported until the first certificate exists.
+  has. It carries the served certificate's thumbprint as an attribute, so a dashboard can tell apart
+  replicas serving different certificates. Nothing is reported until the first certificate exists.
 - `autohttps.certificate.renewals`, a count of the orders this instance completed, tagged
   `outcome=success` or `outcome=failure`.
 

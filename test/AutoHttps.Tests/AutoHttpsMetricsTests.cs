@@ -50,6 +50,18 @@ public class AutoHttpsMetricsTests
     }
 
     [Fact]
+    public void TheExpiryGaugeCarriesTheServedThumbprint()
+    {
+        using var host = new MetricsHost(Now);
+        using ServerCertificate certificate = SelfSigned(host.Time, TimeSpan.FromDays(5));
+        host.State.CertificatePublished(certificate);
+
+        host.ReadGauge();
+
+        Assert.Equal(certificate.Leaf.Thumbprint, host.LastGaugeThumbprint);
+    }
+
+    [Fact]
     public void RenewalsAreCountedByOutcome()
     {
         using var host = new MetricsHost(Now);
@@ -87,7 +99,17 @@ public class AutoHttpsMetricsTests
                     listener.EnableMeasurementEvents(instrument);
                 }
             };
-            _listener.SetMeasurementEventCallback<double>((_, measurement, _, _) => _gauge.Add(measurement));
+            _listener.SetMeasurementEventCallback<double>((_, measurement, tags, _) =>
+            {
+                _gauge.Add(measurement);
+                foreach (KeyValuePair<string, object?> tag in tags)
+                {
+                    if (tag.Key == "autohttps.certificate.thumbprint" && tag.Value is string thumbprint)
+                    {
+                        LastGaugeThumbprint = thumbprint;
+                    }
+                }
+            });
             _listener.SetMeasurementEventCallback<long>((_, measurement, tags, _) =>
             {
                 foreach (KeyValuePair<string, object?> tag in tags)
@@ -106,6 +128,8 @@ public class AutoHttpsMetricsTests
         public AutoHttpsState State { get; }
 
         public AutoHttpsMetrics Metrics { get; }
+
+        public string? LastGaugeThumbprint { get; private set; }
 
         public IReadOnlyList<double> ReadGauge()
         {

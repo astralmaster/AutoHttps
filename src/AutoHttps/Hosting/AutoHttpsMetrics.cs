@@ -51,6 +51,12 @@ internal sealed class AutoHttpsMetrics : IDisposable
             yield break;
         }
 
-        yield return new Measurement<double>((certificate.NotAfter - _time.GetUtcNow()).TotalSeconds);
+        // The thumbprint names the certificate a replica is actually serving, so a dashboard can tell
+        // a replica that is stale relative to its peers, not only that an order succeeded somewhere.
+        // It changes at each renewal, which adds one new series per renewal; that churn is bounded.
+        double seconds = (certificate.NotAfter - _time.GetUtcNow()).TotalSeconds;
+        yield return new Measurement<double>(
+            seconds,
+            new KeyValuePair<string, object?>("autohttps.certificate.thumbprint", certificate.Thumbprint));
     }
 }
