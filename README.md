@@ -150,6 +150,26 @@ The quick start covers the common case. These are the rest:
 | `ServeFallbackCertificate` | `true` | Serve a self-signed certificate until a real one arrives. |
 | `HandleHttp01Requests` | `true` | Answer `/.well-known/acme-challenge` from the pipeline. |
 
+### Builder methods
+
+The options above are set on `AutoHttpsOptions`. `AddAutoHttps` also returns a builder for replacing
+components and adding behaviour. All of these are optional; the section each one links to has the
+detail.
+
+| Method | What it does |
+|---|---|
+| `PersistCertificatesTo<T>()` | Keep certificates somewhere other than the filesystem. See [Storage](#storage). |
+| `PersistAccountKeyTo<T>()` | Keep the ACME account key somewhere other than the filesystem. |
+| `UseDistributedLock<T>()` | Coordinate instances that do not share a filesystem. See [Running several instances](#running-several-instances). |
+| `UseDnsChallengeProvider<T>()` | Publish DNS TXT records for `dns-01` and wildcards. See [Wildcards and DNS challenges](#wildcards-and-dns-challenges). |
+| `AddCertificateListener<T>()` | Run code when the served certificate changes or an order fails. See [Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes). |
+| `UseDevelopmentCertificate()` | Serve a locally trusted certificate in Development instead of ordering one. See [Local development](#local-development). |
+
+Two more surfaces are read rather than configured. Inject `IAutoHttpsCertificateInspector` to read the
+current certificate and the next renewal time, and register the health check with
+`AddHealthChecks().AddAutoHttps()`. Metrics come from a meter named `AutoHttps`. All three are covered
+under [Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes).
+
 ## A private, internal or self-hosted authority
 
 Anything reachable over HTTPS that speaks ACME works: step-ca, Smallstep, an internal CA, or
