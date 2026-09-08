@@ -109,6 +109,19 @@ internal sealed class AutoHttpsOptionsValidator : IValidateOptions<AutoHttpsOpti
             failures.Add($"{nameof(AutoHttpsOptions.DnsPropagationDelay)} cannot be negative.");
         }
 
+        if (options.DnsPropagationResolver is { } resolver &&
+            (!resolver.IsAbsoluteUri || resolver.Scheme is not ("https" or "http")))
+        {
+            failures.Add(
+                $"{nameof(AutoHttpsOptions.DnsPropagationResolver)} must be an absolute https URL of a " +
+                "DNS-over-HTTPS resolver, for example https://dns.google/resolve.");
+        }
+
+        if (options.DnsPropagationResolver is not null)
+        {
+            RequirePositive(failures, options.DnsPropagationTimeout, nameof(AutoHttpsOptions.DnsPropagationTimeout));
+        }
+
         if (options.MaxRetryDelay < options.InitialRetryDelay)
         {
             failures.Add(

@@ -139,7 +139,9 @@ The quick start covers the common case. These are the rest:
 | `ExternalAccountBinding` | *(none)* | Required by ZeroSSL and Google Trust Services. |
 | `DnsChallengeProvider` | *(none)* | Publishes TXT records for `dns-01`. |
 | `PreferredChallengeType` | `http-01` | `http-01` or `dns-01`. |
-| `DnsPropagationDelay` | 30s | Wait after publishing a TXT record before asking for validation. |
+| `DnsPropagationDelay` | 30s | Wait after publishing a TXT record before asking for validation. Ignored when `DnsPropagationResolver` is set. |
+| `DnsPropagationResolver` | *(none)* | DNS-over-HTTPS resolver to poll until the TXT record is visible, instead of the fixed wait. |
+| `DnsPropagationTimeout` | 2m | How long to poll `DnsPropagationResolver` before asking for validation anyway. |
 | `RenewalCheckInterval` | 6h | How often to re-evaluate renewal. |
 | `RenewalThreshold` | `1/3` | Fraction of lifetime that must remain, when the authority gives no advice. |
 | `UseRenewalInformation` | `true` | Ask the authority when to renew (RFC 9773). |
@@ -264,6 +266,24 @@ port 80 is not reachable.
 
 Authorizations are settled one at a time and each record is withdrawn before the next is published,
 so a provider that can only hold one value per record name still works.
+
+### Checking a record has propagated
+
+By default AutoHttps waits a fixed `DnsPropagationDelay` after publishing a TXT record, then asks the
+authority to validate. On a fast DNS provider that wait is longer than needed; on a slow one it can be
+too short, and validation fails. Point `DnsPropagationResolver` at a DNS-over-HTTPS resolver and
+AutoHttps polls it until the record is actually visible, then proceeds:
+
+```csharp
+options.DnsPropagationResolver = new Uri("https://dns.google/resolve");
+```
+
+Cloudflare's `https://cloudflare-dns.com/dns-query` works the same way. Polling stops after
+`DnsPropagationTimeout`, two minutes by default; if the record has still not appeared, the order goes
+ahead anyway and event 134 is logged, because the authority runs its own propagation checks. A recursive
+resolver can briefly serve stale data, so the check is advisory: it shortens the common case and catches
+a provider that never published the record, without ever blocking issuance. AutoHttps makes no DNS
+lookups of its own unless you set this.
 
 ## Running behind a proxy
 
@@ -471,6 +491,7 @@ exists for diagnosis, not alerting.
 | 129 | Warning | A certificate listener threw. The certificate is unaffected and in use. |
 | 131 | Warning | A development certificate was asked for but none is installed. Run `dotnet dev-certs https --trust`. The self-signed fallback is served meanwhile. |
 | 133 | Warning | `PreferredChain` named a chain the authority does not offer. The default chain is served instead. |
+| 134 | Warning | A `dns-01` record was not visible through `DnsPropagationResolver` before the timeout. Validation was requested anyway. |
 | 122 | Error | Something unexpected went wrong, including a storage directory that cannot be written. The application keeps running. |
 
 If you alert on one thing, alert on **110** and **122**. For a readiness signal and certificate

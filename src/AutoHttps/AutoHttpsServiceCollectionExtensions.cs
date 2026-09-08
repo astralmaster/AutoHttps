@@ -22,6 +22,10 @@ public static class AutoHttpsServiceCollectionExtensions
 {
     private static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(60);
 
+    // A DNS-over-HTTPS lookup that has not answered in a few seconds is treated as a miss and retried
+    // on the next poll, so the per-request timeout is kept well under the propagation timeout.
+    private static readonly TimeSpan DnsQueryTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>
     /// Adds the services that obtain and renew certificates, and attaches the certificate selector
     /// to Kestrel's HTTPS defaults.
@@ -65,6 +69,14 @@ public static class AutoHttpsServiceCollectionExtensions
             client.Timeout = HttpTimeout;
             client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
         });
+
+        services.AddHttpClient(AutoHttpsDefaults.DnsHttpClientName, static client =>
+        {
+            client.Timeout = DnsQueryTimeout;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
+        });
+
+        services.TryAddSingleton<DnsPropagationChecker>();
 
         services.TryAddSingleton<FileSystemStore>(static provider => new FileSystemStore(ResolveStorageDirectory(provider)));
         services.TryAddSingleton<ICertificateStore>(static provider => provider.GetRequiredService<FileSystemStore>());

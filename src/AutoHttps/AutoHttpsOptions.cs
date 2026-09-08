@@ -78,9 +78,26 @@ public sealed class AutoHttpsOptions
 
     /// <summary>
     /// How long to wait after publishing a DNS record before asking the authority to validate it.
-    /// Defaults to 30 seconds.
+    /// Defaults to 30 seconds. Ignored when <see cref="DnsPropagationResolver"/> is set, which polls
+    /// for the record instead of waiting a fixed time.
     /// </summary>
     public TimeSpan DnsPropagationDelay { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// A DNS-over-HTTPS resolver to poll for a <c>dns-01</c> TXT record before asking the authority to
+    /// validate it, for example <c>https://dns.google/resolve</c> or
+    /// <c>https://cloudflare-dns.com/dns-query</c>. When set, AutoHttps queries it until the record is
+    /// visible or <see cref="DnsPropagationTimeout"/> elapses, rather than waiting a fixed
+    /// <see cref="DnsPropagationDelay"/>. Leave <see langword="null"/> to keep the fixed wait. AutoHttps
+    /// makes no DNS lookups of its own unless this is set.
+    /// </summary>
+    public Uri? DnsPropagationResolver { get; set; }
+
+    /// <summary>
+    /// How long to keep polling <see cref="DnsPropagationResolver"/> for a record before giving up and
+    /// asking the authority to validate anyway. Defaults to 2 minutes. Only used when a resolver is set.
+    /// </summary>
+    public TimeSpan DnsPropagationTimeout { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
     /// How often to re-evaluate whether a certificate needs renewing. Defaults to 6 hours, which

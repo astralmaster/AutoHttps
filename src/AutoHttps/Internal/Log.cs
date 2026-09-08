@@ -155,4 +155,17 @@ internal static partial class Log
         Message = "PreferredChain requested a chain up to {Preferred}, but the authority offered none matching. " +
                   "Serving the default chain, which leads up to one of: {Offered}.")]
     public static partial void PreferredChainUnavailable(ILogger logger, string preferred, string offered);
+
+    [LoggerMessage(
+        EventId = 134,
+        Level = LogLevel.Warning,
+        Message = "The DNS record {Record} was not visible through the resolver within {Timeout}. " +
+                  "Asking the authority to validate anyway.")]
+    public static partial void DnsPropagationTimedOut(ILogger logger, string record, TimeSpan timeout);
+
+    [LoggerMessage(EventId = 135, Level = LogLevel.Debug, Message = "The DNS record {Record} is visible through the resolver.")]
+    public static partial void DnsRecordVisible(ILogger logger, string record);
+
+    [LoggerMessage(EventId = 136, Level = LogLevel.Debug, Message = "A DNS-over-HTTPS lookup for {Record} failed; retrying.")]
+    public static partial void DnsQueryFailed(ILogger logger, string record, Exception exception);
 }

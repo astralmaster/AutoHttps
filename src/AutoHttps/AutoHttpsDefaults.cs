@@ -12,6 +12,13 @@ public static class AutoHttpsDefaults
     public const string HttpClientName = "AutoHttps.Acme";
 
     /// <summary>
+    /// The name of the <see cref="System.Net.Http.HttpClient"/> used to poll a DNS-over-HTTPS resolver
+    /// while checking that a <c>dns-01</c> record has propagated. Configure it to route those lookups
+    /// through a proxy. It is only used when <see cref="AutoHttpsOptions.DnsPropagationResolver"/> is set.
+    /// </summary>
+    public const string DnsHttpClientName = "AutoHttps.Dns";
+
+    /// <summary>
     /// The name of the <see cref="System.Diagnostics.Metrics.Meter"/> AutoHttps publishes its
     /// instruments through. Subscribe to it with OpenTelemetry or a
     /// <see cref="System.Diagnostics.Metrics.MeterListener"/>.
