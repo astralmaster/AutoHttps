@@ -124,7 +124,7 @@ internal sealed class AutoHttpsService : BackgroundService
             catch (Exception ex)
             {
                 Log.UnexpectedFailure(_logger, description, _nextRetry, ex);
-                await DelayAsync(_nextRetry, stoppingToken);
+                await DelayAsync(JitterRetry(), stoppingToken);
                 _nextRetry = Min(_nextRetry + _nextRetry, _options.MaxRetryDelay);
             }
         }
@@ -173,7 +173,7 @@ internal sealed class AutoHttpsService : BackgroundService
                 break;
 
             case AcquisitionOutcome.Failed:
-                await DelayAsync(_nextRetry, stoppingToken);
+                await DelayAsync(JitterRetry(), stoppingToken);
                 _nextRetry = Min(_nextRetry + _nextRetry, _options.MaxRetryDelay);
                 break;
         }
@@ -544,6 +544,8 @@ internal sealed class AutoHttpsService : BackgroundService
 
     private static string? TryGetCertificateId(ServerCertificate? certificate) =>
         certificate is not null && AcmeCertificateId.TryCompute(certificate.Leaf, out string id) ? id : null;
+
+    private TimeSpan JitterRetry() => RetryBackoff.Jitter(_nextRetry, Random.Shared.NextDouble());
 
     private static TimeSpan Min(TimeSpan left, TimeSpan right) => left < right ? left : right;
 

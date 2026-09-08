@@ -468,7 +468,9 @@ AutoHttps logs event 131 and serves the self-signed fallback so the app still st
 ## Failure behaviour
 
 Certificate management never takes the application down. Failed orders are retried with exponential
-backoff between `InitialRetryDelay` and `MaxRetryDelay`; a store that cannot be written is logged and
+backoff between `InitialRetryDelay` and `MaxRetryDelay`, jittered so that instances which failed at the
+same moment do not retry in lockstep and synchronise into the authority's rate limit; a store that
+cannot be written is logged and
 the certificate stays in use; an unexpected error is logged and retried. When the authority answers
 with a rate limit and a `Retry-After`, that instruction wins over the local backoff. AutoHttps paces
 its polling the same way: while an order or authorization is still validating, it waits as long as a
