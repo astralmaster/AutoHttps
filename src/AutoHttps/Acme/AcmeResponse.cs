@@ -37,3 +37,6 @@ internal sealed class AcmeResponse<T>
 }
 
 internal readonly record struct AcmeLink(Uri Url, string Relation);
+
+/// <summary>A raw (non-JSON) response body together with the Link headers that came with it.</summary>
+internal readonly record struct AcmeRawResponse(string Body, IReadOnlyList<AcmeLink> Links);

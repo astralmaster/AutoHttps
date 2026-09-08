@@ -44,6 +44,15 @@ public sealed class AutoHttpsOptions
     public KeyAlgorithm KeyAlgorithm { get; set; } = KeyAlgorithm.EcdsaP256;
 
     /// <summary>
+    /// The common name of the root the served certificate chain should lead up to, when the authority
+    /// offers more than one chain. It matches the issuer of the topmost certificate in each offered
+    /// chain, the way certbot's <c>--preferred-chain</c> does, for example <c>ISRG Root X1</c> to keep
+    /// clients that only trust the newer root. Leave <see langword="null"/> to take the default chain.
+    /// If nothing matches, the default chain is served and a warning is logged.
+    /// </summary>
+    public string? PreferredChain { get; set; }
+
+    /// <summary>
     /// Where certificates and the account key are written. Defaults to <c>autohttps</c> under the
     /// user's local application data directory. In a container, point this at a mounted volume;
     /// otherwise every restart requests a new certificate and will exhaust the authority's rate limits.

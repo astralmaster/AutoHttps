@@ -342,6 +342,38 @@ public class PebbleIssuanceTests
         Assert.True(await app.HandshakeIsTrustedAsync(domain, _pebble.PebbleRoot));
     }
 
+    [Fact]
+    public async Task HonoursThePreferredChainWhenTheAuthorityOffersAlternateRoots()
+    {
+        using var storage = new TempStorage();
+        string domain = NewDomain();
+
+        await using PebbleApplication app = await PebbleApplication.StartAsync(_pebble, options =>
+        {
+            options.DomainNames.Add(domain);
+            options.StorageDirectory = storage.Path;
+            options.PreferredChain = _pebble.AlternateRootCommonName;
+        });
+
+        ServerCertificate certificate = await app.WaitForCertificateAsync(domain, Timeout);
+
+        // The served chain has to lead up to the alternate root the preference named, not Pebble's
+        // default one, and it has to actually validate up to that root over a real handshake.
+        Assert.Equal(_pebble.AlternateRootCommonName, TopIssuer(certificate));
+        Assert.True(
+            app.Log.CountOf(132) > 0,
+            "The alternate chain selection was never logged." + Environment.NewLine + app.Log.Describe());
+        Assert.True(
+            await app.HandshakeIsTrustedAsync(domain, _pebble.PebbleAlternateRoot),
+            "The served certificate did not chain to the alternate root over a real handshake.");
+    }
+
+    private static string TopIssuer(ServerCertificate certificate)
+    {
+        X509Certificate2Collection intermediates = certificate.Intermediates;
+        return intermediates[intermediates.Count - 1].GetNameInfo(X509NameType.SimpleName, forIssuer: true);
+    }
+
     private static string NewDomain() => $"t{Guid.NewGuid():N}"[..12] + ".autohttps.test";
 
     private sealed class ChallengeTestServerDnsProvider : IDnsChallengeProvider

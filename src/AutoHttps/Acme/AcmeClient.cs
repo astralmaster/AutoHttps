@@ -221,8 +221,24 @@ internal sealed class AcmeClient
         return requested > MaxPollDelay ? MaxPollDelay : requested;
     }
 
-    public Task<string> DownloadCertificateAsync(Uri certificateUrl, CancellationToken cancellationToken) =>
-        _http.PostAsGetRawAsync(_accountKey, KeyId, certificateUrl, PemChainContentType, cancellationToken);
+    public async Task<AcmeCertificate> DownloadCertificateAsync(Uri certificateUrl, CancellationToken cancellationToken)
+    {
+        AcmeRawResponse response = await _http.PostAsGetRawAsync(
+            _accountKey, KeyId, certificateUrl, PemChainContentType, cancellationToken);
+
+        // RFC 8555 section 7.4.2: the authority may advertise other chains for the same certificate
+        // with Link rel="alternate". Surface them so a caller can pick a different trust anchor.
+        var alternates = new List<Uri>();
+        foreach (AcmeLink link in response.Links)
+        {
+            if (string.Equals(link.Relation, "alternate", StringComparison.OrdinalIgnoreCase))
+            {
+                alternates.Add(link.Url);
+            }
+        }
+
+        return new AcmeCertificate(response.Body, alternates);
+    }
 
     public async Task<AcmeRenewalInfoResource?> GetRenewalInfoAsync(string certificateId, CancellationToken cancellationToken)
     {
@@ -348,3 +364,5 @@ internal sealed class AcmeClient
 }
 
 internal sealed record AcmeOrder(Uri Location, AcmeOrderResource Resource);
+
+internal sealed record AcmeCertificate(string Pem, IReadOnlyList<Uri> Alternates);

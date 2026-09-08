@@ -91,6 +91,9 @@ internal sealed class TestIssuedCertificate
 
     public required string ChainPem { get; init; }
 
+    /// <summary>An alternate chain for the same leaf, offered with Link rel="alternate" when set.</summary>
+    public string? AlternateChainPem { get; init; }
+
     public required X509Certificate2 Leaf { get; init; }
 
     public required IReadOnlyList<string> SubjectNames { get; init; }
@@ -181,4 +184,7 @@ internal sealed class TestCaBehavior
 
     /// <summary>Replies with an HTML error page, as an intercepting proxy or captive portal would.</summary>
     public int ReturnHtmlForNextRequests { get; set; }
+
+    /// <summary>Offers a second, cross-signed chain for each certificate with Link rel="alternate".</summary>
+    public bool OfferAlternateChain { get; set; }
 }

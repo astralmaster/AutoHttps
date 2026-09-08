@@ -142,4 +142,17 @@ internal static partial class Log
         Message = "Development environment: no ASP.NET Core development certificate is installed. " +
                   "Run 'dotnet dev-certs https --trust', then restart. Serving the self-signed fallback until then.")]
     public static partial void DevelopmentCertificateMissing(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 132,
+        Level = LogLevel.Information,
+        Message = "Serving the alternate certificate chain that leads up to {Issuer}, as PreferredChain asked.")]
+    public static partial void PreferredChainSelected(ILogger logger, string issuer);
+
+    [LoggerMessage(
+        EventId = 133,
+        Level = LogLevel.Warning,
+        Message = "PreferredChain requested a chain up to {Preferred}, but the authority offered none matching. " +
+                  "Serving the default chain, which leads up to one of: {Offered}.")]
+    public static partial void PreferredChainUnavailable(ILogger logger, string preferred, string offered);
 }

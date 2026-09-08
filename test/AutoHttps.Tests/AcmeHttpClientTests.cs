@@ -263,16 +263,24 @@ public class AcmeHttpClientTests
         {
             "/directory" => Json(DirectoryJson),
             "/new-nonce" => WithNonce(new HttpResponseMessage(HttpStatusCode.NoContent), "n"),
-            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Pem) },
+            _ => WithLink(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Pem) },
+                "<https://acme.example.com/certificate/1/alt>;rel=\"alternate\""),
         });
 
         AcmeHttpClient client = Create(handler, out AcmeKey key);
 
-        string chain = await client.PostAsGetRawAsync(
+        AcmeRawResponse raw = await client.PostAsGetRawAsync(
             key, "kid", new Uri("https://acme.example.com/certificate/1"), "application/pem-certificate-chain", CancellationToken.None);
 
-        Assert.Equal(Pem, chain);
+        Assert.Equal(Pem, raw.Body);
         Assert.Contains("application/pem-certificate-chain", handler.LastAcceptFor("/certificate/1"), StringComparison.Ordinal);
+        Assert.Contains(raw.Links, link => link.Relation == "alternate" && link.Url.AbsoluteUri.EndsWith("/alt", StringComparison.Ordinal));
+    }
+
+    private static HttpResponseMessage WithLink(HttpResponseMessage response, string link)
+    {
+        response.Headers.Add("Link", link);
+        return response;
     }
 
     [Fact]

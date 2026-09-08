@@ -16,6 +16,8 @@ internal sealed class TestCaIssuer : IDisposable
 
     private readonly X509Certificate2 _root;
     private readonly X509Certificate2 _intermediate;
+    private readonly X509Certificate2 _alternateRoot;
+    private readonly X509Certificate2 _alternateIntermediate;
 
     public TestCaIssuer(DateTimeOffset now)
     {
@@ -26,11 +28,22 @@ internal sealed class TestCaIssuer : IDisposable
 
         _root = CreateAuthority($"AutoHttps Test Root {suffix}", issuer: null, now, TimeSpan.FromDays(3650));
         _intermediate = CreateAuthority($"AutoHttps Test Intermediate {suffix}", _root, now, TimeSpan.FromDays(1825));
+
+        // A second root that cross-signs the same intermediate, so the leaf verifies under either
+        // chain. This models the alternate chains an authority offers with Link rel="alternate".
+        _alternateRoot = CreateAuthority($"AutoHttps Alternate Root {suffix}", issuer: null, now, TimeSpan.FromDays(3650));
+        _alternateIntermediate = CrossSign(_intermediate, _alternateRoot, now, TimeSpan.FromDays(1825));
     }
 
     public X509Certificate2 Root => _root;
 
     public X509Certificate2 Intermediate => _intermediate;
+
+    /// <summary>The common name of the root the default chain leads up to.</summary>
+    public string RootCommonName => _root.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
+
+    /// <summary>The common name of the root the alternate chain leads up to.</summary>
+    public string AlternateRootCommonName => _alternateRoot.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
 
     public string IntermediatePem => _intermediate.ExportCertificatePem();
 
@@ -75,6 +88,38 @@ internal sealed class TestCaIssuer : IDisposable
         return builder.ToString();
     }
 
+    /// <summary>The same leaf, presented through the cross-signed intermediate up to the alternate root.</summary>
+    public string BuildAlternateChainPem(X509Certificate2 leaf)
+    {
+        var builder = new StringBuilder();
+        builder.Append(leaf.ExportCertificatePem()).Append('\n');
+        builder.Append(_alternateIntermediate.ExportCertificatePem()).Append('\n');
+        return builder.ToString();
+    }
+
+    private static X509Certificate2 CrossSign(
+        X509Certificate2 intermediate,
+        X509Certificate2 alternateRoot,
+        DateTimeOffset now,
+        TimeSpan lifetime)
+    {
+        // Same subject and public key as the real intermediate, signed by the alternate root. The
+        // certificate carries no private key of its own; the leaf is still signed by the intermediate
+        // key, so it chains under this cross-signed copy exactly as it does under the original.
+        var request = new CertificateRequest(intermediate.SubjectName, intermediate.PublicKey, HashAlgorithmName.SHA256);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, hasPathLengthConstraint: false, 0, critical: true));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(
+            X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign,
+            critical: true));
+        request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(intermediate.PublicKey, critical: false));
+        request.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(
+            alternateRoot,
+            includeKeyIdentifier: true,
+            includeIssuerAndSerial: false));
+
+        return request.Create(alternateRoot, now.AddDays(-1), now + lifetime, CreateSerialNumber());
+    }
+
     public IEnumerable<string> ReadSubjectAlternativeNames(byte[] signingRequestDer)
     {
         CertificateRequest request = CertificateRequest.LoadSigningRequest(
@@ -105,6 +150,8 @@ internal sealed class TestCaIssuer : IDisposable
 
     public void Dispose()
     {
+        _alternateIntermediate.Dispose();
+        _alternateRoot.Dispose();
         _intermediate.Dispose();
         _root.Dispose();
     }

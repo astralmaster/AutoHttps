@@ -100,9 +100,39 @@ internal sealed class CertificateAcquirer
         Uri certificateUrl = completed.Certificate
             ?? throw new AcmeException("The certificate authority marked the order valid but returned no certificate URL.");
 
-        string chain = await client.DownloadCertificateAsync(certificateUrl, cancellationToken);
+        string chain = await SelectChainAsync(client, certificateUrl, cancellationToken);
 
         return new CertificateMaterial(chain, key.ExportPem());
+    }
+
+    private async Task<string> SelectChainAsync(AcmeClient client, Uri certificateUrl, CancellationToken cancellationToken)
+    {
+        AcmeCertificate primary = await client.DownloadCertificateAsync(certificateUrl, cancellationToken);
+
+        string? preferred = _options.PreferredChain;
+        if (string.IsNullOrWhiteSpace(preferred) || ChainSelector.Matches(primary.Pem, preferred))
+        {
+            return primary.Pem;
+        }
+
+        var offered = new List<string> { ChainSelector.TopIssuer(primary.Pem) };
+
+        foreach (Uri alternate in primary.Alternates)
+        {
+            AcmeCertificate candidate = await client.DownloadCertificateAsync(alternate, cancellationToken);
+            if (ChainSelector.Matches(candidate.Pem, preferred))
+            {
+                Log.PreferredChainSelected(_logger, preferred);
+                return candidate.Pem;
+            }
+
+            offered.Add(ChainSelector.TopIssuer(candidate.Pem));
+        }
+
+        // The preference could not be honoured. The default chain still verifies for clients holding
+        // a current root, so serving it beats failing the order over a chain preference.
+        Log.PreferredChainUnavailable(_logger, preferred, string.Join(", ", offered));
+        return primary.Pem;
     }
 
     public async Task<RenewalWindowResult> GetRenewalWindowAsync(string certificateId, CancellationToken cancellationToken)

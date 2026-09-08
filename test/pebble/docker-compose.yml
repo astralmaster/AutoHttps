@@ -29,6 +29,9 @@ services:
       # Pebble's defaults, including rejecting 5% of good nonces and reusing authorizations half the
       # time, because that is the behaviour a client has to survive.
       PEBBLE_VA_NOSLEEP: "1"
+      # Offer one alternate certificate chain, up to a second root, so the preferred-chain selection
+      # can be exercised against a real authority. The default chain is unchanged for every other test.
+      PEBBLE_ALTERNATE_ROOTS: "1"
     ports:
       - "14000:14000"
       - "15000:15000"

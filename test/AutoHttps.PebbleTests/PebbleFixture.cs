@@ -45,17 +45,27 @@ public sealed class PebbleFixture : IAsyncLifetime
 
     public X509Certificate2 PebbleRoot { get; private set; } = null!;
 
+    /// <summary>
+    /// The second root Pebble is configured to offer an alternate chain up to, via PEBBLE_ALTERNATE_ROOTS
+    /// in the compose file. Used to exercise PreferredChain selection against a real authority.
+    /// </summary>
+    public X509Certificate2 PebbleAlternateRoot { get; private set; } = null!;
+
+    public string AlternateRootCommonName => PebbleAlternateRoot.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
+
     public async Task InitializeAsync()
     {
         await EnsurePebbleIsRunningAsync();
         await PublishHostAddressAsync();
 
-        PebbleRoot = await FetchRootAsync();
+        PebbleRoot = await FetchRootAsync(0);
+        PebbleAlternateRoot = await FetchRootAsync(1);
     }
 
     public Task DisposeAsync()
     {
         PebbleRoot?.Dispose();
+        PebbleAlternateRoot?.Dispose();
         _management.Dispose();
         _insecure.Dispose();
 
@@ -116,10 +126,21 @@ public sealed class PebbleFixture : IAsyncLifetime
         }
     }
 
-    private async Task<X509Certificate2> FetchRootAsync()
+    private async Task<X509Certificate2> FetchRootAsync(int index)
     {
-        string pem = await _insecure.GetStringAsync(new Uri("https://localhost:15000/roots/0"));
-        return X509Certificate2.CreateFromPem(pem);
+        try
+        {
+            string pem = await _insecure.GetStringAsync(new Uri($"https://localhost:15000/roots/{index}"));
+            return X509Certificate2.CreateFromPem(pem);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new InvalidOperationException(
+                $"Pebble did not serve root {index} at https://localhost:15000/roots/{index}. " +
+                "The alternate root needs PEBBLE_ALTERNATE_ROOTS set in test/pebble/docker-compose.yml; " +
+                "recreate the container with 'docker compose -f test/pebble/docker-compose.yml up -d'.",
+                ex);
+        }
     }
 
     private async Task PostAsync(string path, object payload)

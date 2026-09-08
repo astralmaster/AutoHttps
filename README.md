@@ -134,6 +134,7 @@ The quick start covers the common case. These are the rest:
 | `CertificateAuthority` | Let's Encrypt | The ACME directory URL. |
 | `Profile` | *(none)* | Certificate profile to request, e.g. `shortlived`. |
 | `KeyAlgorithm` | `EcdsaP256` | Key type for issued certificates. |
+| `PreferredChain` | *(none)* | Root common name the served chain should lead up to, when the authority offers more than one. |
 | `StorageDirectory` | local app data | Where certificates and the account key live. |
 | `ExternalAccountBinding` | *(none)* | Required by ZeroSSL and Google Trust Services. |
 | `DnsChallengeProvider` | *(none)* | Publishes TXT records for `dns-01`. |
@@ -382,6 +383,22 @@ explicitly asked to.
 > cannot send, so this does not stay silent. Using `UseAutoHttps` on the endpoint removes the
 > problem entirely.
 
+## Choosing which chain
+
+Some authorities offer more than one chain for the same certificate, differing in the root they lead
+up to. Let's Encrypt did this while the older DST Root CA X3 was being retired, so that clients which
+only trusted the newer ISRG Root X1 kept working. Set `PreferredChain` to the common name of the root
+you want:
+
+```csharp
+options.PreferredChain = "ISRG Root X1";
+```
+
+AutoHttps then serves the chain whose topmost certificate leads up to that root. If the authority
+offers nothing matching, the default chain is served and a warning (event 133) is logged. The default
+chain still validates for any client holding a current root, so a preference that cannot be met never
+stops a certificate being issued.
+
 ## Before the first certificate arrives
 
 Obtaining a certificate requires the server to already be listening, so there is a window at first
@@ -440,6 +457,7 @@ exists for diagnosis, not alerting.
 | 116 | Information | The service started and is managing these domains. |
 | 120 | Information | A certificate published by another instance was picked up. |
 | 130 | Information | A development certificate is being served and ACME is disabled in this environment. |
+| 132 | Information | The alternate certificate chain requested with `PreferredChain` is being served. |
 | 110 | Warning | An order failed and will be retried. The reason is in the message; the stack trace is logged separately at Debug as event 124. |
 | 112 | Warning | A self-signed fallback is being served, logged once rather than per handshake. |
 | 114 | Warning | The store could not be read; continuing without a cached certificate. |
@@ -452,6 +470,7 @@ exists for diagnosis, not alerting.
 | 127 | Warning | A challenge failed and nothing ever requested the response from this process. The message names the cause the authority reported: a name that did not resolve, a connection it could not make, or something in front of the application answering the challenge path. |
 | 129 | Warning | A certificate listener threw. The certificate is unaffected and in use. |
 | 131 | Warning | A development certificate was asked for but none is installed. Run `dotnet dev-certs https --trust`. The self-signed fallback is served meanwhile. |
+| 133 | Warning | `PreferredChain` named a chain the authority does not offer. The default chain is served instead. |
 | 122 | Error | Something unexpected went wrong, including a storage directory that cannot be written. The application keeps running. |
 
 If you alert on one thing, alert on **110** and **122**. For a readiness signal and certificate

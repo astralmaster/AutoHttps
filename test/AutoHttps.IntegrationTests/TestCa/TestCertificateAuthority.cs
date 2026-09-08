@@ -65,6 +65,12 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     /// <summary>The issuing intermediate, for tests that model a client which already holds it.</summary>
     public X509Certificate2 IntermediateCertificate => _issuer.Intermediate;
 
+    /// <summary>The common name of the root the default chain leads up to.</summary>
+    public string RootCommonName => _issuer.RootCommonName;
+
+    /// <summary>The common name of the root the alternate chain leads up to.</summary>
+    public string AlternateRootCommonName => _issuer.AlternateRootCommonName;
+
     public TestCaBehavior Behavior { get; } = new();
 
     public TestDnsZone Dns { get; } = new();
@@ -151,6 +157,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
         app.MapPost("/order/{id}", (HttpContext context, string id) => OrderAsync(context, id));
         app.MapPost("/finalize/{id}", (HttpContext context, string id) => FinalizeAsync(context, id));
         app.MapPost("/certificate/{id}", (HttpContext context, string id) => CertificateAsync(context, id));
+        app.MapPost("/certificate/{id}/alternate", (HttpContext context, string id) => AlternateCertificateAsync(context, id));
         app.MapGet("/renewal-info/{certificateId}", (HttpContext context, string certificateId) => RenewalInfoAsync(context, certificateId));
     }
 
@@ -733,6 +740,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
         {
             Id = NewId(),
             ChainPem = _issuer.BuildChainPem(leaf),
+            AlternateChainPem = Behavior.OfferAlternateChain ? _issuer.BuildAlternateChainPem(leaf) : null,
             Leaf = leaf,
             SubjectNames = requested,
             Profile = order.Profile,
@@ -771,9 +779,43 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
             return;
         }
 
+        if (certificate.AlternateChainPem is not null)
+        {
+            context.Response.Headers.Link = $"<{Url("certificate/" + id + "/alternate")}>;rel=\"alternate\"";
+        }
+
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "application/pem-certificate-chain";
         await context.Response.WriteAsync(certificate.ChainPem);
+    }
+
+    private async Task AlternateCertificateAsync(HttpContext context, string id)
+    {
+        if (await ShouldInterruptAsync(context))
+        {
+            return;
+        }
+
+        try
+        {
+            VerifiedRequest request = await ReadRequestAsync(context);
+            RequireAccount(request);
+        }
+        catch (JwsVerificationException ex)
+        {
+            await WriteProblemAsync(context, StatusCodes.Status400BadRequest, ex.ErrorType, ex.Message);
+            return;
+        }
+
+        if (!_certificates.TryGetValue(id, out TestIssuedCertificate? certificate) || certificate.AlternateChainPem is null)
+        {
+            await WriteProblemAsync(context, StatusCodes.Status404NotFound, "urn:ietf:params:acme:error:malformed", "Unknown certificate.");
+            return;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/pem-certificate-chain";
+        await context.Response.WriteAsync(certificate.AlternateChainPem);
     }
 
     private async Task RenewalInfoAsync(HttpContext context, string certificateId)

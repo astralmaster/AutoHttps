@@ -112,7 +112,7 @@ internal sealed class AcmeHttpClient
         CancellationToken cancellationToken) =>
         PostAsync(key, keyId, url, string.Empty, typeInfo, cancellationToken);
 
-    public async Task<string> PostAsGetRawAsync(
+    public async Task<AcmeRawResponse> PostAsGetRawAsync(
         AcmeKey key,
         string keyId,
         Uri url,
@@ -131,7 +131,7 @@ internal sealed class AcmeHttpClient
                     typeInfo: null,
                     cancellationToken);
 
-                return response.RawBody;
+                return new AcmeRawResponse(response.RawBody, response.Links);
             }
             catch (AcmeException ex) when (ex.ErrorType == AcmeErrorTypes.BadNonce)
             {
