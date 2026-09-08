@@ -6,6 +6,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageVersion Include="Azure.Identity" Version="1.21.0" />
+    <PackageVersion Include="Azure.ResourceManager.Dns" Version="1.1.1" />
+    <PackageVersion Include="Azure.Security.KeyVault.Secrets" Version="4.11.1" />
     <PackageVersion Include="AWSSDK.Route53" Version="4.0.100.12" />
     <PackageVersion Include="StackExchange.Redis" Version="2.8.16" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
