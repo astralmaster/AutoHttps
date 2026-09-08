@@ -151,6 +151,8 @@ The quick start covers the common case. These are the rest:
 | `MaxRetryDelay` | 6h | Ceiling for that backoff. |
 | `ConfigureKestrel` | `true` | Attach the certificate selector to Kestrel's HTTPS defaults. |
 | `ServeFallbackCertificate` | `true` | Serve a self-signed certificate until a real one arrives. |
+| `RequireCertificateOnStartup` | `false` | Stop the application if no certificate is obtained within `StartupCertificateTimeout`. |
+| `StartupCertificateTimeout` | 2m | How long to wait for the first certificate before stopping, when it is required. |
 | `HandleHttp01Requests` | `true` | Answer `/.well-known/acme-challenge` from the pipeline. |
 
 ### Builder methods
@@ -427,6 +429,15 @@ configured domains during that window, so TLS clients see a certificate warning 
 connection failure. Requests for names you have not configured are refused rather than answered with
 the wrong certificate. Set `ServeFallbackCertificate = false` to turn this off.
 
+Some deployments would rather fail fast than run without a real certificate. Set
+`RequireCertificateOnStartup = true` and, if the first certificate is not obtained within
+`StartupCertificateTimeout` (two minutes by default), AutoHttps stops the application, so an
+orchestrator restarts it rather than leaving it up serving the fallback. A certificate already in the
+store counts, so this only bites when the first one cannot be obtained. It cannot block startup itself:
+a `http-01` challenge needs the server already listening to be answered, so the check runs once the
+application has started. To keep an instance out of a load balancer instead of stopping it, use the
+health check described under [Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes).
+
 ## Local development
 
 ACME cannot reach a developer machine, so there is nothing for AutoHttps to order locally. In the
@@ -493,6 +504,7 @@ exists for diagnosis, not alerting.
 | 133 | Warning | `PreferredChain` named a chain the authority does not offer. The default chain is served instead. |
 | 134 | Warning | A `dns-01` record was not visible through `DnsPropagationResolver` before the timeout. Validation was requested anyway. |
 | 122 | Error | Something unexpected went wrong, including a storage directory that cannot be written. The application keeps running. |
+| 137 | Critical | No certificate was obtained within `StartupCertificateTimeout` and `RequireCertificateOnStartup` is set. The application is being stopped. |
 
 If you alert on one thing, alert on **110** and **122**. For a readiness signal and certificate
 metrics, see [Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes). A

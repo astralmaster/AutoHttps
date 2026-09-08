@@ -34,6 +34,8 @@ internal sealed class AutoHttpsService : BackgroundService
     private readonly IHostEnvironment _environment;
     private readonly DevelopmentCertificateSource _developmentCertificate;
 
+    private readonly TaskCompletionSource _firstCertificate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private ServerCertificate? _current;
     private DateTimeOffset _loggedRenewal;
     private DateTimeOffset _lastIssued;
@@ -98,6 +100,11 @@ internal sealed class AutoHttpsService : BackgroundService
 
         await AdoptFromStoreAsync(storeName, announce: false, stoppingToken);
         await WaitForApplicationStartedAsync(stoppingToken);
+
+        if (_options.RequireCertificateOnStartup && _current is null)
+        {
+            _ = WatchStartupCertificateAsync(description, stoppingToken);
+        }
 
         _nextRetry = _options.InitialRetryDelay;
 
@@ -419,6 +426,32 @@ internal sealed class AutoHttpsService : BackgroundService
         _state.CertificatePublished(certificate);
         _selector.Publish(certificate);
         _loggedRenewal = default;
+        _firstCertificate.TrySetResult();
+    }
+
+    /// <summary>
+    /// Stops the application if no real certificate is in hand within the configured window. A
+    /// certificate adopted from the store already sets <see cref="_firstCertificate"/>, so this only
+    /// fires when the first one genuinely cannot be obtained.
+    /// </summary>
+    private async Task WatchStartupCertificateAsync(string description, CancellationToken stoppingToken)
+    {
+        try
+        {
+            Task timeout = Task.Delay(_options.StartupCertificateTimeout, _time, stoppingToken);
+            Task completed = await Task.WhenAny(_firstCertificate.Task, timeout);
+
+            if (completed == _firstCertificate.Task || stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            Log.StartupCertificateTimedOut(_logger, description, _options.StartupCertificateTimeout);
+            _lifetime.StopApplication();
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     private Task NotifyChangedAsync(

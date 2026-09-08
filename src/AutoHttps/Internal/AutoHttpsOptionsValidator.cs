@@ -122,6 +122,11 @@ internal sealed class AutoHttpsOptionsValidator : IValidateOptions<AutoHttpsOpti
             RequirePositive(failures, options.DnsPropagationTimeout, nameof(AutoHttpsOptions.DnsPropagationTimeout));
         }
 
+        if (options.RequireCertificateOnStartup)
+        {
+            RequirePositive(failures, options.StartupCertificateTimeout, nameof(AutoHttpsOptions.StartupCertificateTimeout));
+        }
+
         if (options.MaxRetryDelay < options.InitialRetryDelay)
         {
             failures.Add(

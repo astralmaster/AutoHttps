@@ -147,6 +147,23 @@ public sealed class AutoHttpsOptions
     public bool ServeFallbackCertificate { get; set; } = true;
 
     /// <summary>
+    /// Whether the application should stop if no real certificate is obtained within
+    /// <see cref="StartupCertificateTimeout"/> of startup. Defaults to <see langword="false"/>, which
+    /// keeps the application running and serving the fallback while it retries. Set to
+    /// <see langword="true"/> to fail fast instead, so an orchestrator restarts the instance rather
+    /// than leaving it up without a usable certificate. A certificate already in the store counts, so
+    /// this only bites when the first one cannot be obtained. It cannot block startup itself, because a
+    /// <c>http-01</c> challenge needs the server already listening to be answered.
+    /// </summary>
+    public bool RequireCertificateOnStartup { get; set; }
+
+    /// <summary>
+    /// How long after startup to wait for the first certificate before stopping the application, when
+    /// <see cref="RequireCertificateOnStartup"/> is set. Defaults to 2 minutes.
+    /// </summary>
+    public TimeSpan StartupCertificateTimeout { get; set; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
     /// Whether to answer <c>http-01</c> challenges from the application's own request pipeline.
     /// Defaults to <see langword="true"/>. Set to <see langword="false"/> if another component
     /// already serves <c>/.well-known/acme-challenge</c>.

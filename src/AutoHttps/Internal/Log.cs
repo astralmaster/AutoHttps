@@ -168,4 +168,11 @@ internal static partial class Log
 
     [LoggerMessage(EventId = 136, Level = LogLevel.Debug, Message = "A DNS-over-HTTPS lookup for {Record} failed; retrying.")]
     public static partial void DnsQueryFailed(ILogger logger, string record, Exception exception);
+
+    [LoggerMessage(
+        EventId = 137,
+        Level = LogLevel.Critical,
+        Message = "No certificate for {Domains} was obtained within {Timeout} of startup and " +
+                  "RequireCertificateOnStartup is set. Stopping the application.")]
+    public static partial void StartupCertificateTimedOut(ILogger logger, string domains, TimeSpan timeout);
 }

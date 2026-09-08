@@ -182,6 +182,26 @@ public class OptionsValidatorTests
     }
 
     [Fact]
+    public void RequiringACertificateOnStartupWithoutAPositiveTimeoutIsRejected()
+    {
+        AutoHttpsOptions options = Valid();
+        options.RequireCertificateOnStartup = true;
+        options.StartupCertificateTimeout = TimeSpan.Zero;
+
+        AssertFails(options, "StartupCertificateTimeout");
+    }
+
+    [Fact]
+    public void TheStartupCertificateTimeoutIsIgnoredWhenTheCertificateIsNotRequired()
+    {
+        AutoHttpsOptions options = Valid();
+        options.RequireCertificateOnStartup = false;
+        options.StartupCertificateTimeout = TimeSpan.Zero;
+
+        Assert.True(_validator.Validate(null, options).Succeeded);
+    }
+
+    [Fact]
     public void AMaxRetryDelayBelowTheInitialOneIsRejected()
     {
         AutoHttpsOptions options = Valid();
