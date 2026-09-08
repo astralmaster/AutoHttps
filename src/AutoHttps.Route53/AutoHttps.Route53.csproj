@@ -6,6 +6,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsPackable>true</IsPackable>
     <PackageId>AutoHttps.Route53</PackageId>
+    <VersionPrefix>1.0.0</VersionPrefix>
     <Title>AutoHttps.Route53</Title>
     <Description>AWS Route 53 DNS provider for AutoHttps. Answers dns-01 challenges, including wildcards, by publishing TXT records in a Route 53 hosted zone.</Description>
     <PackageTags>acme;letsencrypt;dns-01;aws;route53;autohttps;wildcard</PackageTags>
