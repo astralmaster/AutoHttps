@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>AutoHttps.Route53</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>true</IsPackable>
+    <PackageId>AutoHttps.Route53</PackageId>
+    <Title>AutoHttps.Route53</Title>
+    <Description>AWS Route 53 DNS provider for AutoHttps. Answers dns-01 challenges, including wildcards, by publishing TXT records in a Route 53 hosted zone.</Description>
+    <PackageTags>acme;letsencrypt;dns-01;aws;route53;autohttps;wildcard</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.Route53" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../AutoHttps/AutoHttps.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <InternalsVisibleTo Include="AutoHttps.Route53.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -6,6 +6,7 @@
     <Project Path="src/AutoHttps/AutoHttps.csproj" />
     <Project Path="src/AutoHttps.Cloudflare/AutoHttps.Cloudflare.csproj" />
     <Project Path="src/AutoHttps.Redis/AutoHttps.Redis.csproj" />
+    <Project Path="src/AutoHttps.Route53/AutoHttps.Route53.csproj" />
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/AutoHttps.IntegrationTests/AutoHttps.IntegrationTests.csproj" />
@@ -13,5 +14,6 @@
     <Project Path="test/AutoHttps.Tests/AutoHttps.Tests.csproj" />
     <Project Path="test/AutoHttps.Cloudflare.Tests/AutoHttps.Cloudflare.Tests.csproj" />
     <Project Path="test/AutoHttps.Redis.Tests/AutoHttps.Redis.Tests.csproj" />
+    <Project Path="test/AutoHttps.Route53.Tests/AutoHttps.Route53.Tests.csproj" />
   </Folder>
 </Solution>
