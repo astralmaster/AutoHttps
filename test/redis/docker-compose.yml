@@ -1,0 +1,13 @@
+# Brings up a Redis instance so the AutoHttps.Redis stores can be exercised against a real server.
+#
+#   docker compose -f test/redis/docker-compose.yml up -d
+#   dotnet test test/AutoHttps.Redis.Tests
+#
+# Point the tests at a different server with the AUTOHTTPS_REDIS environment variable.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: autohttps-redis
+    ports:
+      - "6379:6379"

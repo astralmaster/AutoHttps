@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>AutoHttps.Redis</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>true</IsPackable>
+    <PackageId>AutoHttps.Redis</PackageId>
+    <Title>AutoHttps.Redis</Title>
+    <Description>Redis certificate and account key stores for AutoHttps, so several instances can share certificates through Redis rather than a filesystem.</Description>
+    <PackageTags>acme;letsencrypt;https;tls;certificate;redis;store;autohttps</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="StackExchange.Redis" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../AutoHttps/AutoHttps.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <InternalsVisibleTo Include="AutoHttps.Redis.Tests" />
+  </ItemGroup>
+
+</Project>
