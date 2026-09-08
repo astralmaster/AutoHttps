@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>AutoHttps.Cloudflare</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>true</IsPackable>
+    <PackageId>AutoHttps.Cloudflare</PackageId>
+    <Title>AutoHttps.Cloudflare</Title>
+    <Description>Cloudflare DNS provider for AutoHttps. Answers dns-01 challenges, including wildcards, by publishing TXT records through the Cloudflare API.</Description>
+    <PackageTags>acme;letsencrypt;dns-01;cloudflare;autohttps;wildcard</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../AutoHttps/AutoHttps.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <InternalsVisibleTo Include="AutoHttps.Cloudflare.Tests" />
+  </ItemGroup>
+
+</Project>
