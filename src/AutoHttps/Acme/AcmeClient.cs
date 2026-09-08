@@ -240,6 +240,18 @@ internal sealed class AcmeClient
         return new AcmeCertificate(response.Body, alternates);
     }
 
+    public async Task RevokeCertificateAsync(byte[] certificateDer, int reason, CancellationToken cancellationToken)
+    {
+        AcmeDirectory directory = await _http.GetDirectoryAsync(cancellationToken);
+        Uri revoke = directory.RevokeCertificate
+            ?? throw new AcmeException("The ACME directory does not advertise a revokeCert endpoint.");
+
+        string payload = BuildRevokePayload(certificateDer, reason);
+
+        await _http.PostAsync(
+            _accountKey, KeyId, revoke, payload, AcmeJsonContext.Default.AcmeEmptyResource, cancellationToken);
+    }
+
     public async Task<AcmeRenewalInfoResource?> GetRenewalInfoAsync(string certificateId, CancellationToken cancellationToken)
     {
         AcmeDirectory directory = await _http.GetDirectoryAsync(cancellationToken);
@@ -343,6 +355,20 @@ internal sealed class AcmeClient
                 writer.WriteString("replaces", replaces);
             }
 
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static string BuildRevokePayload(byte[] certificateDer, int reason)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("certificate", Internal.Base64Url.Encode(certificateDer));
+            writer.WriteNumber("reason", reason);
             writer.WriteEndObject();
         }
 

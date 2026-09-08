@@ -40,6 +40,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     private readonly ConcurrentDictionary<string, TestChallenge> _challenges = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TestIssuedCertificate> _certificates = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _replacedCertificateIds = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, int> _revoked = new(StringComparer.Ordinal);
 
     private int _requestCount;
     private int _orderCount;
@@ -92,6 +93,9 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     public int AccountCount => _accounts.Count;
 
     public IReadOnlyCollection<TestIssuedCertificate> IssuedCertificates => _certificates.Values.ToArray();
+
+    /// <summary>Revoked certificates by thumbprint, with the RFC 5280 reason code the client sent.</summary>
+    public IReadOnlyDictionary<string, int> Revocations => _revoked;
 
     public static async Task<TestCertificateAuthority> StartAsync()
     {
@@ -156,6 +160,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
         app.MapPost("/challenge/{id}", (HttpContext context, string id) => ChallengeAsync(context, id));
         app.MapPost("/order/{id}", (HttpContext context, string id) => OrderAsync(context, id));
         app.MapPost("/finalize/{id}", (HttpContext context, string id) => FinalizeAsync(context, id));
+        app.MapPost("/revoke-cert", RevokeCertificateAsync);
         app.MapPost("/certificate/{id}", (HttpContext context, string id) => CertificateAsync(context, id));
         app.MapPost("/certificate/{id}/alternate", (HttpContext context, string id) => AlternateCertificateAsync(context, id));
         app.MapGet("/renewal-info/{certificateId}", (HttpContext context, string certificateId) => RenewalInfoAsync(context, certificateId));
@@ -816,6 +821,42 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "application/pem-certificate-chain";
         await context.Response.WriteAsync(certificate.AlternateChainPem);
+    }
+
+    private async Task RevokeCertificateAsync(HttpContext context)
+    {
+        if (await ShouldInterruptAsync(context))
+        {
+            return;
+        }
+
+        try
+        {
+            VerifiedRequest request = await ReadRequestAsync(context);
+            RequireAccount(request);
+
+            using JsonDocument payload = JsonDocument.Parse(request.Payload);
+            byte[] der = TestJws.Decode(payload.RootElement.GetProperty("certificate").GetString()!);
+            int reason = payload.RootElement.TryGetProperty("reason", out JsonElement reasonElement)
+                ? reasonElement.GetInt32()
+                : 0;
+
+            TestIssuedCertificate? match = _certificates.Values
+                .FirstOrDefault(c => c.Leaf.RawData.AsSpan().SequenceEqual(der));
+
+            if (match is null)
+            {
+                await WriteProblemAsync(context, StatusCodes.Status404NotFound, "urn:ietf:params:acme:error:malformed", "Unknown certificate.");
+                return;
+            }
+
+            _revoked[match.Leaf.Thumbprint] = reason;
+            context.Response.StatusCode = StatusCodes.Status200OK;
+        }
+        catch (JwsVerificationException ex)
+        {
+            await WriteProblemAsync(context, StatusCodes.Status400BadRequest, ex.ErrorType, ex.Message);
+        }
     }
 
     private async Task RenewalInfoAsync(HttpContext context, string certificateId)

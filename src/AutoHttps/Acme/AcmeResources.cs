@@ -90,6 +90,9 @@ internal sealed class AcmeRenewalWindow
     [JsonPropertyName("end")] public DateTimeOffset End { get; set; }
 }
 
+/// <summary>A response with no body, such as the 200 an authority returns for a successful revocation.</summary>
+internal sealed class AcmeEmptyResource;
+
 internal static class AcmeIdentifierTypes
 {
     public const string Dns = "dns";

@@ -170,10 +170,11 @@ detail.
 | `AddCertificateListener<T>()` | Run code when the served certificate changes or an order fails. See [Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes). |
 | `UseDevelopmentCertificate()` | Serve a locally trusted certificate in Development instead of ordering one. See [Local development](#local-development). |
 
-Two more surfaces are read rather than configured. Inject `IAutoHttpsCertificateInspector` to read the
-current certificate and the next renewal time, and register the health check with
-`AddHealthChecks().AddAutoHttps()`. Metrics come from a meter named `AutoHttps`. All three are covered
-under [Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes).
+A few surfaces are used rather than configured. Inject `IAutoHttpsCertificateInspector` to read the
+current certificate and the next renewal time, inject `IAutoHttpsCertificateManager` to revoke a
+certificate, and register the health check with `AddHealthChecks().AddAutoHttps()`. Metrics come from a
+meter named `AutoHttps`. All of these are covered under
+[Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes).
 
 ## A private, internal or self-hosted authority
 
@@ -491,6 +492,7 @@ exists for diagnosis, not alerting.
 | 120 | Information | A certificate published by another instance was picked up. |
 | 130 | Information | A development certificate is being served and ACME is disabled in this environment. |
 | 132 | Information | The alternate certificate chain requested with `PreferredChain` is being served. |
+| 138 | Information | A certificate was revoked at the authority. |
 | 110 | Warning | An order failed and will be retried. The reason is in the message; the stack trace is logged separately at Debug as event 124. |
 | 112 | Warning | A self-signed fallback is being served, logged once rather than per handshake. |
 | 114 | Warning | The store could not be read; continuing without a cached certificate. |
@@ -589,6 +591,26 @@ app.MapGet("/tls", (IAutoHttpsCertificateInspector inspector) =>
     return Results.Ok(new { status.HasCertificate, status.SubjectNames, status.NotAfter, status.RenewalScheduledAt });
 });
 ```
+
+### Revoking a certificate
+
+Inject `IAutoHttpsCertificateManager` to revoke a certificate at the authority, for a suspected key
+compromise or when decommissioning one:
+
+```csharp
+app.MapPost("/tls/revoke", async (IAutoHttpsCertificateManager manager) =>
+{
+    await manager.RevokeCurrentAsync(RevocationReason.KeyCompromise);
+    return Results.Ok();
+});
+```
+
+`RevokeCurrentAsync` revokes the certificate currently being served and returns `false` if there is
+none. `RevokeAsync` takes a specific `X509Certificate2`. The request is signed with the ACME account
+key, and event 138 records it. Revocation only tells the authority the certificate is no longer valid.
+AutoHttps keeps serving its local copy and does not order a replacement on its own, so this fits
+decommissioning a certificate. To move an instance onto a fresh one, remove the stored certificate and
+restart.
 
 ## Not in scope
 

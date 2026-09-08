@@ -13,4 +13,5 @@ namespace AutoHttps.Acme;
 [JsonSerializable(typeof(AcmeChallengeResource))]
 [JsonSerializable(typeof(AcmeProblem))]
 [JsonSerializable(typeof(AcmeRenewalInfoResource))]
+[JsonSerializable(typeof(AcmeEmptyResource))]
 internal sealed partial class AcmeJsonContext : JsonSerializerContext;

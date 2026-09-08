@@ -175,4 +175,10 @@ internal static partial class Log
         Message = "No certificate for {Domains} was obtained within {Timeout} of startup and " +
                   "RequireCertificateOnStartup is set. Stopping the application.")]
     public static partial void StartupCertificateTimedOut(ILogger logger, string domains, TimeSpan timeout);
+
+    [LoggerMessage(
+        EventId = 138,
+        Level = LogLevel.Information,
+        Message = "Revoked the certificate {Thumbprint} at the authority ({Reason}).")]
+    public static partial void CertificateRevoked(ILogger logger, string thumbprint, RevocationReason reason);
 }
