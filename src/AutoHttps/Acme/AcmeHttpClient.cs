@@ -63,6 +63,12 @@ internal sealed class AcmeHttpClient
         return fetch;
     }
 
+    // Drops the cached directory so the next call refetches it. Used when a request to an endpoint the
+    // directory named fails as if that endpoint has moved, which is how an authority migration surfaces
+    // to a process running since before the move. A refetch faults on its own if the authority is
+    // simply unreachable, so a transient outage does not wedge the cache.
+    private void InvalidateDirectory() => Volatile.Write(ref _directory, null);
+
     private async Task<AcmeDirectory> FetchDirectoryAsync(CancellationToken cancellationToken)
     {
         AcmeResponse<AcmeDirectory> response = await SendWithRetryAsync(
@@ -177,8 +183,29 @@ internal sealed class AcmeHttpClient
 
         using var request = new HttpRequestMessage(HttpMethod.Head, newNonce);
         using HttpClient client = CreateClient();
-        using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
-        CaptureNonce(response);
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.SendAsync(request, cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            // The newNonce endpoint is the first thing an operation touches. If it has gone away, the
+            // directory that named it is stale; drop it so the next attempt refetches the new one.
+            InvalidateDirectory();
+            throw;
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                InvalidateDirectory();
+            }
+
+            CaptureNonce(response);
+        }
 
         if (_nonces.TryPop(out nonce))
         {
@@ -207,6 +234,8 @@ internal sealed class AcmeHttpClient
             {
                 if (attempt >= MaxTransientRetries)
                 {
+                    // A directory-named endpoint that stays unreachable after every retry may have moved.
+                    InvalidateDirectory();
                     throw new AcmeException($"The request to '{request.RequestUri}' failed after {attempt + 1} attempts.", ex);
                 }
 
@@ -230,6 +259,13 @@ internal sealed class AcmeHttpClient
                 }
 
                 AcmeProblem? problem = TryParseProblem(body);
+
+                // A 404 from an endpoint the directory named means the directory is stale: refetch it
+                // on the next call so a moved endpoint is picked up without a restart.
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    InvalidateDirectory();
+                }
 
                 if (attempt < MaxTransientRetries && ShouldRetry(response.StatusCode, problem))
                 {

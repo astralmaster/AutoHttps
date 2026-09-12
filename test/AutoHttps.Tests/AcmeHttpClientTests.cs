@@ -57,6 +57,50 @@ public class AcmeHttpClientTests
     }
 
     [Fact]
+    public async Task AFourOhFourAgainstAMovedEndpointRefreshesTheDirectoryWithoutARestart()
+    {
+        int directoryFetches = 0;
+        var handler = new StubHandler((request, _) =>
+        {
+            switch (request.RequestUri!.AbsolutePath)
+            {
+                case "/directory":
+                    string newOrder = ++directoryFetches == 1 ? "/order-v1" : "/order-v2";
+                    return Json(DirectoryWith("https://acme.example.com" + newOrder));
+                case "/new-nonce":
+                    return WithNonce(new HttpResponseMessage(HttpStatusCode.NoContent), "n");
+                case "/order-v1":
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+                default:
+                    return Json("{}");
+            }
+        });
+
+        AcmeHttpClient client = Create(handler, out AcmeKey key);
+
+        AcmeDirectory stale = await client.GetDirectoryAsync(CancellationToken.None);
+        Assert.Equal("https://acme.example.com/order-v1", stale.NewOrder!.AbsoluteUri);
+
+        // The authority moved newOrder and answers 404 at the old URL.
+        await Assert.ThrowsAsync<AcmeException>(() => client.PostAsync(
+            key, "kid", stale.NewOrder, "{}", AcmeJsonContext.Default.AcmeOrderResource, CancellationToken.None));
+
+        // The next call refetches the directory and picks up the new endpoint, then caches it again.
+        AcmeDirectory fresh = await client.GetDirectoryAsync(CancellationToken.None);
+        AcmeDirectory reused = await client.GetDirectoryAsync(CancellationToken.None);
+
+        Assert.Equal("https://acme.example.com/order-v2", fresh.NewOrder!.AbsoluteUri);
+        Assert.Same(fresh, reused);
+        Assert.Equal(2, directoryFetches);
+    }
+
+    private static string DirectoryWith(string newOrder) =>
+        "{\"newNonce\":\"https://acme.example.com/new-nonce\"," +
+        "\"newAccount\":\"https://acme.example.com/new-account\"," +
+        "\"newOrder\":\"" + newOrder + "\"," +
+        "\"renewalInfo\":\"https://acme.example.com/renewal-info\"}";
+
+    [Fact]
     public async Task PostAsync_FetchesANonceAndSendsItInTheProtectedHeader()
     {
         var handler = new StubHandler((request, _) => request.RequestUri!.AbsolutePath switch
