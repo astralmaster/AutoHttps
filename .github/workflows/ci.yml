@@ -36,6 +36,45 @@ jobs:
       - name: Integration tests
         run: dotnet test test/AutoHttps.IntegrationTests/AutoHttps.IntegrationTests.csproj -c Release --no-build
 
+      # The DNS-provider suites mock their SDK or HTTP calls, so they need no services and run on both
+      # operating systems. The Redis suite needs a live server and runs in its own job below.
+      - name: Cloudflare tests
+        run: dotnet test test/AutoHttps.Cloudflare.Tests/AutoHttps.Cloudflare.Tests.csproj -c Release --no-build
+
+      - name: Route 53 tests
+        run: dotnet test test/AutoHttps.Route53.Tests/AutoHttps.Route53.Tests.csproj -c Release --no-build
+
+      - name: Azure tests
+        run: dotnet test test/AutoHttps.Azure.Tests/AutoHttps.Azure.Tests.csproj -c Release --no-build
+
+  redis:
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      # The fixture fails loudly rather than skipping when Redis is absent, so a job that could not
+      # reach the service turns red instead of reporting a hollow green.
+      - name: Redis tests
+        run: dotnet test test/AutoHttps.Redis.Tests/AutoHttps.Redis.Tests.csproj -c Release
+
   package:
     runs-on: ubuntu-latest
     steps:
