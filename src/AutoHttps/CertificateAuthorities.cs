@@ -19,10 +19,18 @@ public static class CertificateAuthorities
     /// <summary>Google Trust Services. Requires an <see cref="ExternalAccountBinding"/>.</summary>
     public static Uri GoogleTrustServices { get; } = new("https://dv.acme-v02.api.pki.goog/directory");
 
-    /// <summary>Buypass Go SSL production.</summary>
+    /// <summary>
+    /// Buypass Go SSL production. Discontinued: Buypass ended its ACME service in 2025 and this
+    /// endpoint no longer responds.
+    /// </summary>
+    [Obsolete("Buypass discontinued its ACME service (Go SSL) in 2025 and this endpoint returns 404. Use LetsEncrypt, ZeroSsl, or GoogleTrustServices.")]
     public static Uri Buypass { get; } = new("https://api.buypass.com/acme/directory");
 
-    /// <summary>Buypass Go SSL staging.</summary>
+    /// <summary>
+    /// Buypass Go SSL staging. Discontinued: Buypass ended its ACME service in 2025 and this
+    /// endpoint no longer responds.
+    /// </summary>
+    [Obsolete("Buypass discontinued its ACME service (Go SSL) in 2025 and this endpoint returns 404. Use LetsEncryptStaging.")]
     public static Uri BuypassStaging { get; } = new("https://api.test4.buypass.no/acme/directory");
 }
 

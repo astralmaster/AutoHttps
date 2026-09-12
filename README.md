@@ -70,7 +70,7 @@ Core shared framework, including a complete RFC 8555 client written for this lib
 | **Wildcards** | Yes, via `dns-01` |
 | **Renewal** | ACME Renewal Information (RFC 9773), with a lifetime-proportional fallback |
 | **Profiles** | `classic`, `tlsserver`, `shortlived`. Six-day certificates work out of the box |
-| **Authorities** | Let's Encrypt, ZeroSSL, Google Trust Services, Buypass, or any ACME directory |
+| **Authorities** | Let's Encrypt, ZeroSSL, Google Trust Services, or any ACME directory |
 | **External account binding** | Yes, required by ZeroSSL and Google Trust Services |
 | **Keys** | ECDSA P-256 (default), P-384, RSA 2048/3072/4096 |
 | **Multiple instances** | Locked and shared through the certificate store |
