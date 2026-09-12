@@ -176,6 +176,10 @@ internal sealed class TestCaBehavior
 
     public int RejectNextFinalizeCount { get; set; }
 
+    /// <summary>Answers orderNotReady to this many finalize attempts before accepting one, as an
+    /// authority whose order has not yet flipped to ready would.</summary>
+    public int NotReadyNextFinalizeCount { get; set; }
+
     /// <summary>Issues certificates whose validity starts in the future, as a skewed authority clock would.</summary>
     public TimeSpan NotBeforeSkew { get; set; }
 

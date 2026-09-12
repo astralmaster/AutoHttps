@@ -726,6 +726,17 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
             return;
         }
 
+        if (Behavior.NotReadyNextFinalizeCount > 0)
+        {
+            Behavior.NotReadyNextFinalizeCount--;
+            await WriteProblemAsync(
+                context,
+                StatusCodes.Status403Forbidden,
+                "urn:ietf:params:acme:error:orderNotReady",
+                "The order is not ready to be finalized yet.");
+            return;
+        }
+
         RefreshOrderStatus(order);
 
         if (order.Status != "ready")

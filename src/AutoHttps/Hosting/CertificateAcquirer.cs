@@ -92,7 +92,20 @@ internal sealed class CertificateAcquirer
         using var key = CertificateKey.Create(_options.KeyAlgorithm);
         byte[] signingRequest = CertificateFactory.CreateSigningRequest(identifiers, key);
 
-        await client.FinalizeOrderAsync(finalizeUrl, signingRequest, cancellationToken);
+        try
+        {
+            await client.FinalizeOrderAsync(finalizeUrl, signingRequest, cancellationToken);
+        }
+        catch (AcmeException ex) when (ex.ErrorType == AcmeErrorTypes.OrderNotReady)
+        {
+            // The authorizations are valid but the order has not flipped to ready yet (RFC 8555
+            // section 7.4). Wait for readiness and finalize once more, rather than abandon the order
+            // and order a fresh one against the authority's duplicate-order rate limit.
+            Log.OrderNotReadyRetrying(_logger, description);
+            await client.WaitForOrderReadyAsync(
+                order.Location, _options.ValidationTimeout, _options.PollInterval, cancellationToken);
+            await client.FinalizeOrderAsync(finalizeUrl, signingRequest, cancellationToken);
+        }
 
         AcmeOrderResource completed = await client.WaitForOrderAsync(
             order.Location, _options.ValidationTimeout, _options.PollInterval, cancellationToken);

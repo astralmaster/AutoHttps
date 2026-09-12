@@ -118,6 +118,7 @@ internal static class AcmeErrorTypes
     public const string AccountDoesNotExist = "urn:ietf:params:acme:error:accountDoesNotExist";
     public const string BadSignatureAlgorithm = "urn:ietf:params:acme:error:badSignatureAlgorithm";
     public const string AlreadyReplaced = "urn:ietf:params:acme:error:alreadyReplaced";
+    public const string OrderNotReady = "urn:ietf:params:acme:error:orderNotReady";
     public const string UserActionRequired = "urn:ietf:params:acme:error:userActionRequired";
     public const string Dns = "urn:ietf:params:acme:error:dns";
     public const string Connection = "urn:ietf:params:acme:error:connection";

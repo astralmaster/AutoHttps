@@ -167,6 +167,51 @@ internal sealed class AcmeClient
         return response.Content ?? throw new AcmeException("The certificate authority returned an empty order.");
     }
 
+    /// <summary>
+    /// Polls the order until it reaches <c>ready</c> (or a later state), used to recover when a
+    /// finalize arrives a moment before the order has flipped to ready. RFC 8555 section 7.4 expects
+    /// the client to wait for readiness and finalize then, rather than abandon the order.
+    /// </summary>
+    public async Task WaitForOrderReadyAsync(
+        Uri orderUrl,
+        TimeSpan timeout,
+        TimeSpan pollInterval,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset deadline = _time.GetUtcNow() + timeout;
+
+        while (true)
+        {
+            AcmeResponse<AcmeOrderResource> response = await _http.PostAsGetAsync(
+                _accountKey, KeyId, orderUrl, AcmeJsonContext.Default.AcmeOrderResource, cancellationToken);
+            AcmeOrderResource order = response.Content
+                ?? throw new AcmeException("The certificate authority returned an empty order.");
+
+            switch (order.Status)
+            {
+                case AcmeStatus.Ready:
+                case AcmeStatus.Processing:
+                case AcmeStatus.Valid:
+                    return;
+                case AcmeStatus.Invalid:
+                    throw new AcmeException(
+                        $"The certificate authority rejected the order: {order.Error?.Detail ?? "no detail supplied"}",
+                        order.Error?.Type,
+                        order.Error?.Detail,
+                        order.Error?.Status);
+                default:
+                    break;
+            }
+
+            if (_time.GetUtcNow() >= deadline)
+            {
+                throw new AcmeException("Timed out waiting for the certificate authority to make the order ready.");
+            }
+
+            await Task.Delay(PollDelay(response.RetryAfter, pollInterval), _time, cancellationToken);
+        }
+    }
+
     public async Task<AcmeOrderResource> WaitForOrderAsync(
         Uri orderUrl,
         TimeSpan timeout,

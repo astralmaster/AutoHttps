@@ -195,4 +195,10 @@ internal static partial class Log
         Message = "The certificate authority rate limited {Domains} and asked to wait until {RequestedUntil:u}, " +
                   "longer than the certificate can afford. Retrying by {RetryBy:u} instead so it does not expire.")]
     public static partial void RateLimitCapped(ILogger logger, string domains, DateTimeOffset requestedUntil, DateTimeOffset retryBy);
+
+    [LoggerMessage(
+        EventId = 141,
+        Level = LogLevel.Debug,
+        Message = "The order for {Domains} was not ready to finalize yet; waiting for it and finalizing again.")]
+    public static partial void OrderNotReadyRetrying(ILogger logger, string domains);
 }

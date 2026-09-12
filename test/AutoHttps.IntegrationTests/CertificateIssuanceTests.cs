@@ -329,6 +329,29 @@ public class CertificateIssuanceTests
     }
 
     [Fact]
+    public async Task RetriesFinalizeWhenTheOrderIsNotReadyYetInsteadOfOrderingAgain()
+    {
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        // The first finalize is answered with orderNotReady, the race RFC 8555 section 7.4 describes:
+        // the authorizations are valid but the order has not flipped to ready yet.
+        authority.Behavior.NotReadyNextFinalizeCount = 1;
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+        });
+
+        await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+
+        // The order is finalized on the retry, so the certificate is still issued from the one order
+        // rather than abandoning it and paying for a second against the duplicate-order limit.
+        Assert.Equal(1, authority.OrderCount);
+    }
+
+    [Fact]
     public async Task PollsTheAuthorizationUntilTheAuthorityMarksItValid()
     {
         using var storage = new TempStorage();

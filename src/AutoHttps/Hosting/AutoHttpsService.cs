@@ -276,7 +276,10 @@ internal sealed class AutoHttpsService : BackgroundService
         }
 
         RenewalWindow? window = null;
-        if (AcmeCertificateId.TryCompute(current.Leaf, out string certificateId))
+
+        // RFC 9773 section 4.3: do not ask for renewal information about a certificate that has already
+        // expired. It is being replaced regardless, so the query would only waste a request each loop.
+        if (current.NotAfter > now && AcmeCertificateId.TryCompute(current.Leaf, out string certificateId))
         {
             try
             {
