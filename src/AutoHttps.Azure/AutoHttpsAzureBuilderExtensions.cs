@@ -50,6 +50,9 @@ public static class AutoHttpsAzureBuilderExtensions
         ArgumentNullException.ThrowIfNull(configure);
 
         builder.Services.Configure(configure);
+        builder.Services.AddOptions<AzureKeyVaultOptions>().ValidateOnStart();
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<AzureKeyVaultOptions>, AzureKeyVaultOptionsValidator>());
 
         builder.Services.TryAddSingleton<IKeyVaultSecretClient>(provider =>
         {
