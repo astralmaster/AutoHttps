@@ -188,4 +188,11 @@ internal static partial class Log
         Message = "Could not read Kestrel's HTTPS defaults to check that AutoHttps installed its " +
                   "certificate selector; skipping the ordering check.")]
     public static partial void KestrelDefaultsUnverifiable(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 140,
+        Level = LogLevel.Warning,
+        Message = "The certificate authority rate limited {Domains} and asked to wait until {RequestedUntil:u}, " +
+                  "longer than the certificate can afford. Retrying by {RetryBy:u} instead so it does not expire.")]
+    public static partial void RateLimitCapped(ILogger logger, string domains, DateTimeOffset requestedUntil, DateTimeOffset retryBy);
 }

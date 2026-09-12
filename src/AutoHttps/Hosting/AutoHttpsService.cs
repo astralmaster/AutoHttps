@@ -233,11 +233,23 @@ internal sealed class AutoHttpsService : BackgroundService
             catch (AcmeRateLimitException ex)
             {
                 // The authority said when it will accept another request. Ignoring that only digs
-                // the hole deeper, so its instruction overrides the local backoff.
-                if (ex.RetryAfter is { } retryAfter && retryAfter > _time.GetUtcNow())
+                // the hole deeper, so its instruction overrides the local backoff, but never so far
+                // out that renewal would be suspended until the certificate expires. See
+                // RateLimit.ClampDeadline.
+                DateTimeOffset now = _time.GetUtcNow();
+                if (ex.RetryAfter is { } retryAfter && retryAfter > now)
                 {
-                    _rateLimitedUntil = retryAfter;
-                    Log.RateLimited(_logger, description, retryAfter);
+                    DateTimeOffset deadline = RateLimit.ClampDeadline(retryAfter, now, _current?.NotAfter, MaxRateLimitWait);
+                    _rateLimitedUntil = deadline;
+
+                    if (deadline < retryAfter)
+                    {
+                        Log.RateLimitCapped(_logger, description, retryAfter, deadline);
+                    }
+                    else
+                    {
+                        Log.RateLimited(_logger, description, deadline);
+                    }
                 }
 
                 Log.OrderFailed(_logger, description, Describe(ex), _nextRetry);
