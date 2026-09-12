@@ -19,6 +19,13 @@ public sealed class AutoHttpsOptions
     /// The contact address registered with the certificate authority. Used for account recovery and,
     /// at some authorities, for problem notifications.
     /// </summary>
+    /// <remarks>
+    /// The stored ACME account is keyed by this address together with the authority, so changing it,
+    /// including correcting a typo, makes the next issuance register a new account with a new key
+    /// rather than reuse the existing one. The previous account and its rate-limit history are left in
+    /// place at the authority but no longer used, and its contact is not updated. Set the address once
+    /// and keep it stable; to move to a new one, expect a new account.
+    /// </remarks>
     public string? EmailAddress { get; set; }
 
     /// <summary>

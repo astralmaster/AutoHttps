@@ -129,7 +129,7 @@ The quick start covers the common case. These are the rest:
 | Option | Default | What it does |
 |---|---|---|
 | `DomainNames` | *(required)* | Domains to request. A `*.` entry needs `DnsChallengeProvider`. |
-| `EmailAddress` | *(required)* | Contact registered with the authority. |
+| `EmailAddress` | *(required)* | Contact registered with the authority. Changing it later registers a new account. |
 | `AcceptTermsOfService` | `false` | Must be `true`. Startup fails otherwise. |
 | `CertificateAuthority` | Let's Encrypt | The ACME directory URL. |
 | `Profile` | *(none)* | Certificate profile to request, e.g. `shortlived`. |
