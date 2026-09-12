@@ -203,8 +203,12 @@ internal sealed class TestCaIssuer : IDisposable
 
     private static byte[] CreateSerialNumber()
     {
+        // The top bit is left as it falls, so roughly half of these serials have it set. A serial
+        // whose leading octet is >= 0x80 gets a 0x00 prepended in its DER encoding to stay positive,
+        // which is exactly the case the RFC 9773 certificate id has to carry through. Masking it off,
+        // as this used to, meant the leading-zero path was never issued. A real authority and Pebble
+        // both produce random serials, so this matches them.
         byte[] serial = RandomNumberGenerator.GetBytes(16);
-        serial[0] &= 0x7F;
 
         if (serial[0] == 0)
         {

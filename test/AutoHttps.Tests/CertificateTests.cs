@@ -202,6 +202,41 @@ public class AcmeCertificateIdTests
         Assert.True(AcmeCertificateId.TryCompute(second, out string secondId));
         Assert.NotEqual(firstId, secondId);
     }
+
+    [Fact]
+    public void TryCompute_KeepsTheLeadingZeroOfAHighBitSerial()
+    {
+        // A serial whose leading octet is >= 0x80 is a positive integer whose DER content octets carry
+        // a prepended 0x00. RFC 9773 asks for those content octets, not the minimal magnitude, so the
+        // id must include the leading zero. Real serials hit this about half the time; the test issuers
+        // used to mask it off, so it went untested.
+        byte[] serial = [0x80, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+        byte[] authorityKeyIdentifier = [0xDE, 0xAD, 0xBE, 0xEF, 0x01];
+
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest("CN=high-bit-serial", key, HashAlgorithmName.SHA256);
+        request.CertificateExtensions.Add(
+            X509AuthorityKeyIdentifierExtension.CreateFromSubjectKeyIdentifier(authorityKeyIdentifier));
+
+        using X509Certificate2 certificate = request.Create(
+            request.SubjectName,
+            X509SignatureGenerator.CreateForECDsa(key),
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(1),
+            serial);
+
+        // The stored content octets are the 0x00 followed by the sixteen serial bytes.
+        byte[] expectedOctets = new byte[serial.Length + 1];
+        Array.Copy(serial, 0, expectedOctets, 1, serial.Length);
+        Assert.Equal(expectedOctets, certificate.SerialNumberBytes.ToArray());
+
+        Assert.True(AcmeCertificateId.TryCompute(certificate, out string id));
+
+        string[] parts = id.Split('.');
+        Assert.Equal(2, parts.Length);
+        Assert.Equal(Base64Url.Encode(authorityKeyIdentifier), parts[0]);
+        Assert.Equal(Base64Url.Encode(expectedOctets), parts[1]);
+    }
 }
 
 /// <summary>A minimal two level issuer, so certificate handling can be tested without a network.</summary>
