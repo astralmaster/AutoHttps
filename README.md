@@ -357,6 +357,22 @@ builder.Services
 > - **Route `/.well-known/acme-challenge` to a single replica** at your load balancer.
 > - **Run one instance** that owns certificates and share the store with the rest read-only.
 
+## Configuring Kestrel yourself
+
+AutoHttps turns on HTTPS by installing a certificate selector into Kestrel's HTTPS defaults. Kestrel
+keeps one such delegate and replaces it on every `ConfigureHttpsDefaults` call, so if you configure
+HTTPS defaults yourself the order matters.
+
+- `UseUrls("https://...")` and the `Kestrel:Endpoints` configuration work in either order. Prefer them.
+- If you call `ConfigureHttpsDefaults` yourself, for example to pin TLS versions or to serve your own
+  certificate for another domain, call `AddAutoHttps` after that call. AutoHttps then keeps your TLS
+  options and your selector, and answers only the names it manages.
+
+If a later `ConfigureHttpsDefaults` call replaces the selector, the application stops at startup with
+an error that names the cause, rather than failing with Kestrel's opaque "no server certificate"
+message or serving the developer certificate for a managed domain. To manage certificates yourself
+and keep AutoHttps out of Kestrel, set `ConfigureKestrel = false`.
+
 ## Sending the full chain
 
 By default AutoHttps attaches a certificate selector to Kestrel's HTTPS defaults. Kestrel ignores a

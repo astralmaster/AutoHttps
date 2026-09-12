@@ -106,6 +106,7 @@ public static class AutoHttpsServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IStartupFilter, Http01StartupFilter>());
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IConfigureOptions<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>, KestrelCertificateConfigurator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IStartupFilter, KestrelConfigurationGuard>());
 
         services.AddHostedService<AutoHttpsService>();
 

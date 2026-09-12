@@ -181,4 +181,11 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "Revoked the certificate {Thumbprint} at the authority ({Reason}).")]
     public static partial void CertificateRevoked(ILogger logger, string thumbprint, RevocationReason reason);
+
+    [LoggerMessage(
+        EventId = 139,
+        Level = LogLevel.Debug,
+        Message = "Could not read Kestrel's HTTPS defaults to check that AutoHttps installed its " +
+                  "certificate selector; skipping the ordering check.")]
+    public static partial void KestrelDefaultsUnverifiable(ILogger logger);
 }

@@ -137,6 +137,16 @@ public sealed class AutoHttpsOptions
     /// <see langword="true"/>. Set to <see langword="false"/> to wire endpoints yourself with
     /// <see cref="ListenOptionsExtensions.UseAutoHttps(Microsoft.AspNetCore.Server.Kestrel.Core.ListenOptions, IServiceProvider)"/>.
     /// </summary>
+    /// <remarks>
+    /// Kestrel keeps a single HTTPS-defaults delegate and replaces it on every
+    /// <c>ConfigureHttpsDefaults</c> call. If the application calls <c>ConfigureHttpsDefaults</c>
+    /// itself, for example to set the TLS protocol versions, call <c>AddAutoHttps</c> after that call
+    /// so AutoHttps's selector is not the one discarded; AutoHttps then keeps the application's TLS
+    /// options and any selector it set. <c>UseUrls</c> and the <c>Kestrel:Endpoints</c> configuration
+    /// work in either order. When a later call does replace the selector, AutoHttps stops the
+    /// application at startup with an explanatory error rather than letting it serve the wrong
+    /// certificate.
+    /// </remarks>
     public bool ConfigureKestrel { get; set; } = true;
 
     /// <summary>

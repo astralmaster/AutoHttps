@@ -1,8 +1,7 @@
 using System;
-using System.Security.Cryptography.X509Certificates;
 using AutoHttps.Certificates;
-using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.Options;
 
 namespace AutoHttps.Hosting;
@@ -25,29 +24,14 @@ internal sealed class KestrelCertificateConfigurator : IConfigureOptions<Kestrel
             return;
         }
 
-        options.ConfigureHttpsDefaults(https =>
-        {
-            // Kestrel ignores a configured certificate as soon as a selector is present, so simply
-            // installing one would take over every endpoint and drop connections for names AutoHttps
-            // does not manage. Whatever the application had is kept as the fallback instead. The
-            // certificate is read inside the callback because endpoint configuration runs after
-            // these defaults have been applied.
-            Func<ConnectionContext?, string?, X509Certificate2?>? existing = https.ServerCertificateSelector;
-
-            https.ServerCertificateSelector = (connection, name) =>
-            {
-                if (!string.IsNullOrEmpty(name) && _selector.Select(connection, name) is { } managed)
-                {
-                    return managed;
-                }
-
-                // A request for a name AutoHttps was not asked to manage, or one carrying no server
-                // name at all, belongs to whatever the application configured. Only when the
-                // application configured nothing does AutoHttps answer it.
-                return existing?.Invoke(connection, name)
-                    ?? https.ServerCertificate
-                    ?? _selector.Select(connection, name);
-            };
-        });
+        // Capture whatever HTTPS defaults were configured before AutoHttps. ConfigureHttpsDefaults
+        // replaces the single defaults delegate rather than adding to it, so without replaying the
+        // previous one the application's own TLS options and certificate selector would be lost even
+        // when AutoHttps runs last. If AutoHttps runs first this is the empty starting default. When
+        // the previous delegate cannot be read (a future Kestrel change) it is not replayed, and the
+        // startup guard still reports a selector that a later call replaced.
+        Action<HttpsConnectionAdapterOptions>? previous = KestrelHttpsDefaults.Capture(options);
+        var composer = new KestrelHttpsDefaultsComposer(_selector, previous);
+        options.ConfigureHttpsDefaults(composer.Apply);
     }
 }
