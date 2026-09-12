@@ -160,6 +160,32 @@ public class CertificateSelectorTests : IDisposable
     }
 
     [Fact]
+    public void AnExpiredFallbackIsReplacedRatherThanServedPastItsValidity()
+    {
+        _selector.SetFallbackNames(["example.com"]);
+
+        X509Certificate2 first = _selector.Select(null, "example.com")!;
+
+        // A first certificate that never arrives leaves the fallback in use past its 14-day lifetime.
+        _time.Advance(TimeSpan.FromDays(15));
+        X509Certificate2 second = _selector.Select(null, "example.com")!;
+
+        Assert.NotEqual(first.Thumbprint, second.Thumbprint);
+
+        // The replacement is valid at the current time, and still backdated to tolerate clock skew.
+        DateTimeOffset now = _time.GetUtcNow();
+        Assert.True(second.NotAfter.ToUniversalTime() > now.UtcDateTime);
+        Assert.True(second.NotBefore.ToUniversalTime() <= now.AddMinutes(-4).UtcDateTime);
+
+        // The superseded fallback is retired, not dropped mid-handshake, then disposed after the grace period.
+        Assert.Equal(1, _selector.RetiredCount);
+        _time.Advance(TimeSpan.FromMinutes(6));
+        _selector.CollectRetired();
+        Assert.Equal(0, _selector.RetiredCount);
+        Assert.True(IsDisposed(first));
+    }
+
+    [Fact]
     public void NoFallbackIsGeneratedForNamesTheApplicationDoesNotOwn()
     {
         _selector.SetFallbackNames(["example.com"]);

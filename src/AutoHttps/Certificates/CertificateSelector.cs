@@ -154,22 +154,7 @@ internal sealed class CertificateSelector : IDisposable
             return null;
         }
 
-        X509Certificate2? fallback = Volatile.Read(ref _fallback);
-        if (fallback is null)
-        {
-            X509Certificate2 created = CertificateFactory.CreateSelfSigned(names, _time.GetUtcNow(), FallbackLifetime);
-            X509Certificate2? existing = Interlocked.CompareExchange(ref _fallback, created, null);
-
-            if (existing is not null)
-            {
-                created.Dispose();
-                fallback = existing;
-            }
-            else
-            {
-                fallback = created;
-            }
-        }
+        X509Certificate2 fallback = EnsureFallback(names);
 
         // Reported once per outage rather than once per handshake, which would flood the log of a
         // server that is taking connections while its first certificate is still being issued.
@@ -179,6 +164,38 @@ internal sealed class CertificateSelector : IDisposable
         }
 
         return fallback;
+    }
+
+    // The fallback is self-signed and lives for FallbackLifetime. If the first real certificate has
+    // still not arrived by the time it expires, generate a fresh one rather than keep serving an
+    // expired certificate for the rest of the outage. The old one is retired on the same delay as a
+    // replaced certificate, because a handshake in flight may still hold it.
+    private X509Certificate2 EnsureFallback(string[] names)
+    {
+        while (true)
+        {
+            DateTimeOffset now = _time.GetUtcNow();
+            X509Certificate2? current = Volatile.Read(ref _fallback);
+
+            if (current is not null && new DateTimeOffset(current.NotAfter.ToUniversalTime(), TimeSpan.Zero) > now)
+            {
+                return current;
+            }
+
+            X509Certificate2 created = CertificateFactory.CreateSelfSigned(names, now, FallbackLifetime);
+            if (Interlocked.CompareExchange(ref _fallback, created, current) == current)
+            {
+                if (current is not null)
+                {
+                    _retired.Enqueue(new RetiredCertificate(current, now + RetirementDelay));
+                }
+
+                return created;
+            }
+
+            // Another handshake generated one first; keep theirs and drop this attempt.
+            created.Dispose();
+        }
     }
 
     private static bool IsConfigured(string[] names, string hostName)
@@ -210,5 +227,7 @@ internal sealed class CertificateSelector : IDisposable
         return false;
     }
 
-    private sealed record RetiredCertificate(ServerCertificate Certificate, DateTimeOffset RetireAt);
+    // Holds either a replaced ServerCertificate or a superseded self-signed fallback, both of which
+    // are disposed once no handshake can still be holding them.
+    private sealed record RetiredCertificate(IDisposable Certificate, DateTimeOffset RetireAt);
 }
