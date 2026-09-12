@@ -76,7 +76,11 @@ internal sealed class AcmeClient
         Uri newOrder = directory.NewOrder
             ?? throw new AcmeException("The ACME directory does not advertise a newOrder endpoint.");
 
-        string payload = BuildOrderPayload(identifiers, profile, replaces);
+        // RFC 9773 section 5: only send replaces to an authority that advertises renewalInfo. Sending
+        // it to one that does not risks the order being rejected as malformed. The field is only a
+        // rate-limit hint the authority may honour on a renewal, so dropping it costs nothing else.
+        string? renewalHint = directory.RenewalInfo is not null ? replaces : null;
+        string payload = BuildOrderPayload(identifiers, profile, renewalHint);
 
         AcmeResponse<AcmeOrderResource> response = await _http.PostAsync(
             _accountKey,

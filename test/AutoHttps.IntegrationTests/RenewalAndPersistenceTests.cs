@@ -246,6 +246,32 @@ public class RenewalAndPersistenceTests
     }
 
     [Fact]
+    public async Task DoesNotSendReplacesToAnAuthorityThatDoesNotAdvertiseRenewalInformation()
+    {
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        // The authority advertises no renewalInfo and rejects any order carrying replaces. A renewal
+        // that reaches issuance therefore proves the client did not send it (RFC 9773 section 5).
+        authority.Behavior.AdvertiseRenewalInfo = false;
+        authority.Behavior.CertificateLifetime = TimeSpan.FromSeconds(30);
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            Configure(storage)(options);
+            options.RenewalCheckInterval = TimeSpan.FromMilliseconds(500);
+            options.RenewalThreshold = 0.5;
+        });
+
+        ServerCertificate first = await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+        ServerCertificate renewed = await app.WaitForCertificateChangeAsync(
+            "app.example.com", first.Leaf.Thumbprint, TimeSpan.FromSeconds(45));
+
+        Assert.NotEqual(first.Leaf.Thumbprint, renewed.Leaf.Thumbprint);
+        Assert.False(authority.SawReplaces);
+    }
+
+    [Fact]
     public async Task DoesNotOrderRepeatedlyWhenEveryCertificateLooksDueOnArrival()
     {
         using var storage = new TempStorage();

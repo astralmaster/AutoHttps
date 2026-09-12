@@ -45,6 +45,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     private int _requestCount;
     private int _orderCount;
     private int _orderAttempts;
+    private int _sawReplaces;
     private readonly ConcurrentQueue<DateTimeOffset> _orderAttemptTimes = new();
     private readonly ConcurrentQueue<DateTimeOffset> _authorizationPollTimes = new();
 
@@ -84,6 +85,9 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     public int OrderCount => Volatile.Read(ref _orderCount);
 
     public int OrderAttempts => Volatile.Read(ref _orderAttempts);
+
+    /// <summary>Whether any order this authority received carried an RFC 9773 replaces field.</summary>
+    public bool SawReplaces => Volatile.Read(ref _sawReplaces) == 1;
 
     public IReadOnlyList<DateTimeOffset> OrderAttemptTimes => _orderAttemptTimes.ToArray();
 
@@ -377,6 +381,24 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
 
         string? profile = root.TryGetProperty("profile", out JsonElement profileElement) ? profileElement.GetString() : null;
         string? replaces = root.TryGetProperty("replaces", out JsonElement replacesElement) ? replacesElement.GetString() : null;
+
+        if (replaces is not null)
+        {
+            Volatile.Write(ref _sawReplaces, 1);
+
+            // RFC 9773 section 5: a client must not send replaces to an authority that does not
+            // advertise renewalInfo. One that validates its input strictly rejects the unknown field,
+            // which is what catches a client that sends it unconditionally.
+            if (!Behavior.AdvertiseRenewalInfo)
+            {
+                await WriteProblemAsync(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "urn:ietf:params:acme:error:malformed",
+                    "This authority does not advertise renewalInfo, so an order must not carry a replaces field.");
+                return;
+            }
+        }
 
         if (profile is not null && Behavior.AdvertiseProfiles &&
             profile is not (CertificateProfiles.Classic or CertificateProfiles.TlsServer or CertificateProfiles.ShortLived))
