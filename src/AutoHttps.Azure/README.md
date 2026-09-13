@@ -52,4 +52,5 @@ Officer on the vault.
 (default 60), and the credential fields.
 
 `AzureKeyVaultOptions`: `VaultUri` (required), `SecretPrefix` (default `autohttps-`), and the credential
-fields.
+fields. `SecretPrefix` may contain only letters, digits and hyphens and is at most 30 characters, so
+the Key Vault secret name stays within its 127-character limit; both are checked at startup.
