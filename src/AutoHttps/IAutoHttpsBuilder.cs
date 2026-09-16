@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography.X509Certificates;
 using AutoHttps.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,13 +18,13 @@ public interface IAutoHttpsBuilder
     /// <summary>Replaces the certificate store.</summary>
     /// <typeparam name="TStore">The store implementation.</typeparam>
     /// <returns>The builder.</returns>
-    IAutoHttpsBuilder PersistCertificatesTo<TStore>()
+    IAutoHttpsBuilder PersistCertificatesTo<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStore>()
         where TStore : class, ICertificateStore;
 
     /// <summary>Replaces the ACME account key store.</summary>
     /// <typeparam name="TStore">The store implementation.</typeparam>
     /// <returns>The builder.</returns>
-    IAutoHttpsBuilder PersistAccountKeyTo<TStore>()
+    IAutoHttpsBuilder PersistAccountKeyTo<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStore>()
         where TStore : class, IAccountKeyStore;
 
     /// <summary>
@@ -31,13 +32,13 @@ public interface IAutoHttpsBuilder
     /// </summary>
     /// <typeparam name="TLock">The lock implementation.</typeparam>
     /// <returns>The builder.</returns>
-    IAutoHttpsBuilder UseDistributedLock<TLock>()
+    IAutoHttpsBuilder UseDistributedLock<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TLock>()
         where TLock : class, IDistributedLock;
 
     /// <summary>Registers the provider that publishes DNS TXT records for <c>dns-01</c> challenges.</summary>
     /// <typeparam name="TProvider">The provider implementation.</typeparam>
     /// <returns>The builder.</returns>
-    IAutoHttpsBuilder UseDnsChallengeProvider<TProvider>()
+    IAutoHttpsBuilder UseDnsChallengeProvider<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TProvider>()
         where TProvider : class, IDnsChallengeProvider;
 
     /// <summary>
@@ -46,7 +47,7 @@ public interface IAutoHttpsBuilder
     /// </summary>
     /// <typeparam name="TListener">The listener implementation.</typeparam>
     /// <returns>The builder.</returns>
-    IAutoHttpsBuilder AddCertificateListener<TListener>()
+    IAutoHttpsBuilder AddCertificateListener<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TListener>()
         where TListener : class, IAutoHttpsCertificateListener;
 
     /// <summary>
@@ -89,35 +90,35 @@ internal sealed class AutoHttpsBuilder : IAutoHttpsBuilder
 
     public IServiceCollection Services { get; }
 
-    public IAutoHttpsBuilder PersistCertificatesTo<TStore>()
+    public IAutoHttpsBuilder PersistCertificatesTo<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStore>()
         where TStore : class, ICertificateStore
     {
         Services.Replace(ServiceDescriptor.Singleton<ICertificateStore, TStore>());
         return this;
     }
 
-    public IAutoHttpsBuilder PersistAccountKeyTo<TStore>()
+    public IAutoHttpsBuilder PersistAccountKeyTo<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStore>()
         where TStore : class, IAccountKeyStore
     {
         Services.Replace(ServiceDescriptor.Singleton<IAccountKeyStore, TStore>());
         return this;
     }
 
-    public IAutoHttpsBuilder UseDistributedLock<TLock>()
+    public IAutoHttpsBuilder UseDistributedLock<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TLock>()
         where TLock : class, IDistributedLock
     {
         Services.Replace(ServiceDescriptor.Singleton<IDistributedLock, TLock>());
         return this;
     }
 
-    public IAutoHttpsBuilder UseDnsChallengeProvider<TProvider>()
+    public IAutoHttpsBuilder UseDnsChallengeProvider<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TProvider>()
         where TProvider : class, IDnsChallengeProvider
     {
         Services.Replace(ServiceDescriptor.Singleton<IDnsChallengeProvider, TProvider>());
         return this;
     }
 
-    public IAutoHttpsBuilder AddCertificateListener<TListener>()
+    public IAutoHttpsBuilder AddCertificateListener<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TListener>()
         where TListener : class, IAutoHttpsCertificateListener
     {
         Services.TryAddEnumerable(ServiceDescriptor.Singleton<IAutoHttpsCertificateListener, TListener>());

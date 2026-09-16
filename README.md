@@ -647,6 +647,15 @@ restart.
   nothing tells it that the certificate it holds is never the one clients see. It cannot detect this
   for you, so check what your edge actually serves.
 
+## Trimming and native AOT
+
+The core `AutoHttps` package is trim and native-AOT compatible, and its build runs the trimming and
+AOT analyzers so it stays that way. Register it with `AddAutoHttps(options => ...)`. The
+`AddAutoHttps(IConfiguration)` overload binds options by reflection, which a trimmed or ahead-of-time
+build cannot preserve, so it carries the `RequiresUnreferencedCode` and `RequiresDynamicCode`
+warnings; set the options in the lambda instead when you publish that way. The companion packages pull
+in vendor SDKs and are not marked AOT compatible.
+
 ## Building and testing
 
 ```

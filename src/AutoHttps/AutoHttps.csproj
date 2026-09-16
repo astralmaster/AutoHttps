@@ -5,6 +5,7 @@
     <RootNamespace>AutoHttps</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsPackable>true</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
     <PackageId>AutoHttps</PackageId>
     <Title>AutoHttps</Title>
     <Description>Automatic HTTPS for ASP.NET Core. Obtains and renews TLS certificates from Let's Encrypt or any ACME certificate authority, with no external dependencies.</Description>

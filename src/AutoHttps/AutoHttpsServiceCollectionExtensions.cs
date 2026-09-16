@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Reflection;
 using AutoHttps.Certificates;
@@ -48,6 +49,12 @@ public static class AutoHttpsServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The configuration section holding the options.</param>
     /// <returns>A builder for replacing the storage, locking and DNS components.</returns>
+    [RequiresUnreferencedCode(
+        "Binds AutoHttpsOptions from configuration by reflection. Use the AddAutoHttps(Action<AutoHttpsOptions>) " +
+        "overload in a trimmed application.")]
+    [RequiresDynamicCode(
+        "Binds AutoHttpsOptions from configuration, which can require generating code at runtime. Use the " +
+        "AddAutoHttps(Action<AutoHttpsOptions>) overload in an ahead-of-time compiled application.")]
     public static IAutoHttpsBuilder AddAutoHttps(this IServiceCollection services, IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(services);
