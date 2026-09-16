@@ -20,17 +20,17 @@ public static class CertificateAuthorities
     public static Uri GoogleTrustServices { get; } = new("https://dv.acme-v02.api.pki.goog/directory");
 
     /// <summary>
-    /// Buypass Go SSL production. Discontinued: Buypass ended its ACME service in 2025 and this
-    /// endpoint no longer responds.
+    /// Buypass Go SSL production. Discontinued: Buypass stopped issuing certificates in October 2025
+    /// and terminated its ACME service in April 2026, so this endpoint no longer responds.
     /// </summary>
-    [Obsolete("Buypass discontinued its ACME service (Go SSL) in 2025 and this endpoint returns 404. Use LetsEncrypt, ZeroSsl, or GoogleTrustServices.")]
+    [Obsolete("Buypass stopped issuing certificates in October 2025 and terminated its ACME service in April 2026. Use LetsEncrypt, ZeroSsl, or GoogleTrustServices.")]
     public static Uri Buypass { get; } = new("https://api.buypass.com/acme/directory");
 
     /// <summary>
-    /// Buypass Go SSL staging. Discontinued: Buypass ended its ACME service in 2025 and this
-    /// endpoint no longer responds.
+    /// Buypass Go SSL staging. Discontinued: Buypass stopped issuing certificates in October 2025
+    /// and terminated its ACME service in April 2026, so this endpoint no longer responds.
     /// </summary>
-    [Obsolete("Buypass discontinued its ACME service (Go SSL) in 2025 and this endpoint returns 404. Use LetsEncryptStaging.")]
+    [Obsolete("Buypass stopped issuing certificates in October 2025 and terminated its ACME service in April 2026. Use LetsEncryptStaging.")]
     public static Uri BuypassStaging { get; } = new("https://api.test4.buypass.no/acme/directory");
 }
 
