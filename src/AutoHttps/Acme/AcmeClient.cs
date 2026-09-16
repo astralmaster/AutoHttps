@@ -80,6 +80,23 @@ internal sealed class AcmeClient
         // it to one that does not risks the order being rejected as malformed. The field is only a
         // rate-limit hint the authority may honour on a renewal, so dropping it costs nothing else.
         string? renewalHint = directory.RenewalInfo is not null ? replaces : null;
+
+        // The profile is not dropped the way replaces is: a profile decides the certificate's shape and
+        // lifetime, so silently discarding one would hand back a different certificate than asked for.
+        // When the directory advertises its profiles, that list is authoritative (ACME profiles
+        // extension), so a requested profile it omits would be rejected a round trip later; fail now and
+        // name the profiles that exist. A directory that advertises none is left to decide for itself,
+        // so a profile still reaches an authority that supports the extension without listing it, and an
+        // unknown one there is reported by the authority rather than swallowed here.
+        if (!string.IsNullOrEmpty(profile) &&
+            directory.Meta?.Profiles is { Count: > 0 } profiles &&
+            !profiles.ContainsKey(profile))
+        {
+            throw new AcmeException(
+                $"The certificate authority does not offer the '{profile}' certificate profile. " +
+                $"It offers: {string.Join(", ", profiles.Keys)}.");
+        }
+
         string payload = BuildOrderPayload(identifiers, profile, renewalHint);
 
         AcmeResponse<AcmeOrderResource> response = await _http.PostAsync(

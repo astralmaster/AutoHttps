@@ -270,6 +270,31 @@ public class CertificateIssuanceTests
     }
 
     [Fact]
+    public async Task ReportsAProfileTheAuthorityDoesNotAdvertiseWithoutOrdering()
+    {
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.Profile = "not-a-real-profile";
+            options.StorageDirectory = storage.Path;
+        });
+
+        // The directory advertises its profiles and this one is not among them, so AutoHttps reports the
+        // failure and never sends an order for it.
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + IssuanceTimeout;
+        while (app.Log.CountOf(110) == 0 && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
+
+        Assert.True(app.Log.CountOf(110) > 0, "The unknown profile was not reported:" + Environment.NewLine + app.Log.Describe());
+        Assert.Null(app.FindCertificate("app.example.com"));
+        Assert.Equal(0, authority.OrderAttempts);
+    }
+
+    [Fact]
     public async Task RecoversWhenTheAuthorityRejectsSeveralNonces()
     {
         using var storage = new TempStorage();
