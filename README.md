@@ -673,6 +673,12 @@ Pebble is left at its defaults, which means it rejects 5% of otherwise good nonc
 authorizations half the time. The unit and integration suites run on both .NET 8 and .NET 10; the
 Pebble suite runs on .NET 10.
 
+Every push runs the unit and integration suites and the four companion-package suites (Cloudflare,
+Route 53, Azure, and Redis against a `redis:7-alpine` service container) on Linux and Windows. The
+Pebble suite runs on a nightly schedule and on demand instead, because it needs Pebble reachable over
+the Docker bridge. It is the only suite that drives the ACME protocol end to end against a server
+nobody here wrote, so a nightly run catches wire-level regressions without holding up a pull request.
+
 ## License
 
 MIT. See [LICENSE](https://github.com/astralmaster/AutoHttps/blob/main/LICENSE).

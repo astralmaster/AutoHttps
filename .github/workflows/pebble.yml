@@ -1,10 +1,14 @@
 # Runs the suite against Pebble, the ACME test server Let's Encrypt builds alongside Boulder, so
-# the client is checked against an implementation nobody here wrote. It is not part of the pull
-# request build because it needs Pebble to reach the runner over the Docker bridge.
+# the client is checked against an implementation nobody here wrote. It is kept out of the pull
+# request build because it needs Pebble to reach the runner over the Docker bridge, and runs on a
+# nightly schedule instead so wire-level regressions are caught without waiting for someone to
+# dispatch it. It can still be started by hand.
 name: Pebble
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '30 3 * * *'
 
 jobs:
   pebble:
