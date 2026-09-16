@@ -67,6 +67,10 @@ internal sealed class AcmeHttpClient
     // directory named fails as if that endpoint has moved, which is how an authority migration surfaces
     // to a process running since before the move. A refetch faults on its own if the authority is
     // simply unreachable, so a transient outage does not wedge the cache.
+    //
+    // A fetch already running when this clears the cache can still publish its stale result afterwards.
+    // The single ordered renewal loop serialises these, so it does not matter today; a concurrent
+    // refresh would need a generation check on the assignment in GetDirectoryAsync.
     private void InvalidateDirectory() => Volatile.Write(ref _directory, null);
 
     private async Task<AcmeDirectory> FetchDirectoryAsync(CancellationToken cancellationToken)
