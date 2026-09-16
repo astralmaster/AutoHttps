@@ -12,11 +12,13 @@ internal static class CertificateFactory
     private const string ServerAuthenticationOid = "1.3.6.1.5.5.7.3.1";
     private const int MaxCommonNameLength = 64;
 
-    // Schannel rejects ephemeral keys for server authentication, so on Windows the key has to be
-    // persisted for the lifetime of the certificate object. Everywhere else an ephemeral key
-    // avoids writing key material to disk.
+    // Schannel rejects ephemeral keys for server authentication, so on Windows the key is loaded into
+    // a container that lives only as long as the certificate object and is removed when it is disposed
+    // (no PersistKeySet). It is not marked exportable: nothing here exports the served certificate, and
+    // a key that cannot be exported is one less piece of material a long-running host can leak.
+    // Everywhere else an ephemeral key keeps the material out of any on-disk store to begin with.
     internal static readonly X509KeyStorageFlags StorageFlags = OperatingSystem.IsWindows()
-        ? X509KeyStorageFlags.Exportable
+        ? X509KeyStorageFlags.DefaultKeySet
         : X509KeyStorageFlags.Exportable | X509KeyStorageFlags.EphemeralKeySet;
 
     public static byte[] CreateSigningRequest(IReadOnlyList<string> identifiers, CertificateKey key)
