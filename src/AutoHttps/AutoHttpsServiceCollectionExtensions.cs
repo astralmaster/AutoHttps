@@ -103,6 +103,7 @@ public static class AutoHttpsServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IChallengeHandler, Http01ChallengeHandler>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IChallengeHandler, Dns01ChallengeHandler>());
 
+        services.TryAddSingleton<KestrelConfigurationProbe>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IStartupFilter, Http01StartupFilter>());
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IConfigureOptions<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>, KestrelCertificateConfigurator>());

@@ -118,6 +118,73 @@ public class KestrelWiringTests
         Assert.Equal(legacy.Thumbprint, served.Thumbprint);
     }
 
+    [Fact]
+    public async Task EndpointDeclaredBeforeAddAutoHttpsIsReportedWhenTheHostStarts()
+    {
+        using var storage = new TempStorage();
+        var logs = new LogCapture();
+
+        using X509Certificate2 other = CertificateFactory.CreateSelfSigned(
+            ["localhost"], DateTimeOffset.UtcNow, TimeSpan.FromDays(30));
+
+        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { EnvironmentName = "Production" });
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(logs);
+        builder.WebHost.UseKestrelHttpsConfiguration();
+
+        // The HTTPS endpoint is declared before AddAutoHttps, so UseHttps copies the HTTPS defaults as
+        // they are now, before AutoHttps installs its selector. AutoHttps is never consulted for this
+        // endpoint, which then serves 'other' for the managed name. The guard reports that once started.
+        builder.WebHost.ConfigureKestrel(kestrel => kestrel.ListenAnyIP(0, listen => listen.UseHttps(other)));
+
+        builder.Services.AddAutoHttps(options =>
+        {
+            options.DomainNames.Add("managed.example.com");
+            options.EmailAddress = "operator@example.com";
+            options.AcceptTermsOfService = true;
+            options.CertificateAuthority = new Uri("http://127.0.0.1:1/dir");
+            options.StorageDirectory = storage.Path;
+            options.ServeFallbackCertificate = false;
+        });
+
+        await using WebApplication app = builder.Build();
+        await app.StartAsync();
+        await app.StopAsync();
+
+        Assert.True(logs.CountOf(142) > 0, logs.Describe());
+    }
+
+    [Fact]
+    public async Task EndpointBoundAfterAddAutoHttpsIsNotReported()
+    {
+        using var storage = new TempStorage();
+        var logs = new LogCapture();
+
+        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { EnvironmentName = "Production" });
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(logs);
+        builder.WebHost.UseKestrelHttpsConfiguration();
+
+        builder.Services.AddAutoHttps(options =>
+        {
+            options.DomainNames.Add("managed.example.com");
+            options.EmailAddress = "operator@example.com";
+            options.AcceptTermsOfService = true;
+            options.CertificateAuthority = new Uri("http://127.0.0.1:1/dir");
+            options.StorageDirectory = storage.Path;
+        });
+
+        // The address binds during server start, after AutoHttps has installed its selector, so the
+        // composer runs for it and the guard stays quiet.
+        builder.WebHost.UseUrls("https://127.0.0.1:0");
+
+        await using WebApplication app = builder.Build();
+        await app.StartAsync();
+        await app.StopAsync();
+
+        Assert.Equal(0, logs.CountOf(142));
+    }
+
     private static async Task WaitForManagedAsync(CertificateSelector selector, string hostName, TimeSpan timeout)
     {
         DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;

@@ -201,4 +201,15 @@ internal static partial class Log
         Level = LogLevel.Debug,
         Message = "The order for {Domains} was not ready to finalize yet; waiting for it and finalizing again.")]
     public static partial void OrderNotReadyRetrying(ILogger logger, string domains);
+
+    [LoggerMessage(
+        EventId = 142,
+        Level = LogLevel.Warning,
+        Message = "AutoHttps is configured for {Domains} but no HTTPS endpoint used the certificate selector it " +
+                  "installed, so a managed name is served with a different certificate (in Development, the ASP.NET " +
+                  "Core developer certificate). An endpoint declared with UseHttps before AddAutoHttps keeps the " +
+                  "HTTPS defaults from before AutoHttps was added. Call AddAutoHttps before declaring HTTPS " +
+                  "endpoints, bind them with UseUrls or Kestrel:Endpoints, or set ConfigureKestrel to false and " +
+                  "wire endpoints with listenOptions.UseAutoHttps.")]
+    public static partial void KestrelDefaultsNotApplied(ILogger logger, string domains);
 }

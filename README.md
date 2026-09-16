@@ -367,11 +367,18 @@ HTTPS defaults yourself the order matters.
 - If you call `ConfigureHttpsDefaults` yourself, for example to pin TLS versions or to serve your own
   certificate for another domain, call `AddAutoHttps` after that call. AutoHttps then keeps your TLS
   options and your selector, and answers only the names it manages.
+- If you declare an HTTPS endpoint yourself with `listen.UseHttps(...)` through `ConfigureKestrel`,
+  call `AddAutoHttps` before it. An endpoint declared first copies the HTTPS defaults as they stand at
+  that point, before AutoHttps installs its selector, and goes on serving its own certificate for a
+  managed name.
 
 If a later `ConfigureHttpsDefaults` call replaces the selector, the application stops at startup with
 an error that names the cause, rather than failing with Kestrel's opaque "no server certificate"
-message or serving the developer certificate for a managed domain. To manage certificates yourself
-and keep AutoHttps out of Kestrel, set `ConfigureKestrel = false`.
+message or serving the developer certificate for a managed domain. If no HTTPS endpoint used the
+selector at all, because every endpoint was declared before `AddAutoHttps`, AutoHttps logs a warning
+once the host has started that names the same remedies, rather than leave the wrong certificate served
+in silence. To manage certificates yourself and keep AutoHttps out of Kestrel, set
+`ConfigureKestrel = false`.
 
 ## Sending the full chain
 

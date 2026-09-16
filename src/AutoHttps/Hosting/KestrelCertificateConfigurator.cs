@@ -10,11 +10,16 @@ internal sealed class KestrelCertificateConfigurator : IConfigureOptions<Kestrel
 {
     private readonly AutoHttpsOptions _options;
     private readonly CertificateSelector _selector;
+    private readonly KestrelConfigurationProbe _probe;
 
-    public KestrelCertificateConfigurator(IOptions<AutoHttpsOptions> options, CertificateSelector selector)
+    public KestrelCertificateConfigurator(
+        IOptions<AutoHttpsOptions> options,
+        CertificateSelector selector,
+        KestrelConfigurationProbe probe)
     {
         _options = options.Value;
         _selector = selector;
+        _probe = probe;
     }
 
     public void Configure(KestrelServerOptions options)
@@ -31,7 +36,7 @@ internal sealed class KestrelCertificateConfigurator : IConfigureOptions<Kestrel
         // the previous delegate cannot be read (a future Kestrel change) it is not replayed, and the
         // startup guard still reports a selector that a later call replaced.
         Action<HttpsConnectionAdapterOptions>? previous = KestrelHttpsDefaults.Capture(options);
-        var composer = new KestrelHttpsDefaultsComposer(_selector, previous);
+        var composer = new KestrelHttpsDefaultsComposer(_selector, previous, _probe);
         options.ConfigureHttpsDefaults(composer.Apply);
     }
 }
