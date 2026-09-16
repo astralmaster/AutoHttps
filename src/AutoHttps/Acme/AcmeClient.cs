@@ -318,12 +318,12 @@ internal sealed class AcmeClient
             _accountKey, KeyId, revoke, payload, AcmeJsonContext.Default.AcmeEmptyResource, cancellationToken);
     }
 
-    public async Task<AcmeRenewalInfoResource?> GetRenewalInfoAsync(string certificateId, CancellationToken cancellationToken)
+    public async Task<AcmeRenewalInfo> GetRenewalInfoAsync(string certificateId, CancellationToken cancellationToken)
     {
         AcmeDirectory directory = await _http.GetDirectoryAsync(cancellationToken);
         if (directory.RenewalInfo is null)
         {
-            return null;
+            return default;
         }
 
         var url = new Uri(EnsureTrailingSlash(directory.RenewalInfo) + certificateId);
@@ -333,12 +333,14 @@ internal sealed class AcmeClient
             AcmeResponse<AcmeRenewalInfoResource> response = await _http.GetAsync(
                 url, AcmeJsonContext.Default.AcmeRenewalInfoResource, cancellationToken);
 
-            return response.Content;
+            // RFC 9773 section 4.2: the response's Retry-After says when the client should query
+            // renewal information again. Carry it so the renewal loop can re-check when asked.
+            return new AcmeRenewalInfo(response.Content, response.RetryAfter);
         }
         catch (AcmeException ex)
         {
             Log.RenewalInfoUnavailable(_logger, certificateId, ex);
-            return null;
+            return default;
         }
     }
 
@@ -458,3 +460,5 @@ internal sealed class AcmeClient
 internal sealed record AcmeOrder(Uri Location, AcmeOrderResource Resource);
 
 internal sealed record AcmeCertificate(string Pem, IReadOnlyList<Uri> Alternates);
+
+internal readonly record struct AcmeRenewalInfo(AcmeRenewalInfoResource? Resource, DateTimeOffset? RetryAfter);

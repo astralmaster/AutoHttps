@@ -156,15 +156,16 @@ internal sealed class CertificateAcquirer
         }
 
         AcmeClient client = await _session.GetClientAsync(requireAccount: false, cancellationToken);
-        AcmeRenewalInfoResource? info = await client.GetRenewalInfoAsync(certificateId, cancellationToken);
+        AcmeRenewalInfo info = await client.GetRenewalInfoAsync(certificateId, cancellationToken);
 
-        if (info?.SuggestedWindow is not { } window || window.End <= window.Start)
+        Renewal.RenewalWindow? window = null;
+        if (info.Resource?.SuggestedWindow is { } suggested && suggested.End > suggested.Start)
         {
-            return default;
+            Log.RenewalWindowReceived(_logger, suggested.Start, suggested.End);
+            window = new Renewal.RenewalWindow(suggested.Start, suggested.End);
         }
 
-        Log.RenewalWindowReceived(_logger, window.Start, window.End);
-        return new RenewalWindowResult(new Renewal.RenewalWindow(window.Start, window.End));
+        return new RenewalWindowResult(window, info.RetryAfter);
     }
 
     private async Task AuthorizeAsync(AcmeClient client, Uri authorizationUrl, CancellationToken cancellationToken)
@@ -282,4 +283,4 @@ internal sealed class CertificateAcquirer
     }
 }
 
-internal readonly record struct RenewalWindowResult(Renewal.RenewalWindow? Window);
+internal readonly record struct RenewalWindowResult(Renewal.RenewalWindow? Window, DateTimeOffset? RecheckAt);

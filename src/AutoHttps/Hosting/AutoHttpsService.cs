@@ -139,12 +139,14 @@ internal sealed class AutoHttpsService : BackgroundService
         _selector.CollectRetired();
 
         DateTimeOffset now = _time.GetUtcNow();
-        DateTimeOffset renewAt = await ComputeRenewalTimeAsync(now, stoppingToken);
+        (DateTimeOffset renewAt, DateTimeOffset? recheckAt) = await ComputeRenewalTimeAsync(now, stoppingToken);
 
         if (renewAt > now)
         {
             LogSchedule(description, renewAt);
-            await DelayAsync(Min(renewAt - now, _options.RenewalCheckInterval), stoppingToken);
+            await DelayAsync(
+                RenewalSchedule.ComputeCheckDelay(now, renewAt, recheckAt, _options.RenewalCheckInterval, DeferredPollInterval),
+                stoppingToken);
             return;
         }
 
@@ -267,15 +269,18 @@ internal sealed class AutoHttpsService : BackgroundService
         }
     }
 
-    private async Task<DateTimeOffset> ComputeRenewalTimeAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<(DateTimeOffset RenewAt, DateTimeOffset? RecheckAt)> ComputeRenewalTimeAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
     {
         ServerCertificate? current = _current;
         if (current is null)
         {
-            return now;
+            return (now, null);
         }
 
         RenewalWindow? window = null;
+        DateTimeOffset? recheckAt = null;
 
         // RFC 9773 section 4.3: do not ask for renewal information about a certificate that has already
         // expired. It is being replaced regardless, so the query would only waste a request each loop.
@@ -283,7 +288,9 @@ internal sealed class AutoHttpsService : BackgroundService
         {
             try
             {
-                window = (await _acquirer.GetRenewalWindowAsync(certificateId, cancellationToken)).Window;
+                RenewalWindowResult info = await _acquirer.GetRenewalWindowAsync(certificateId, cancellationToken);
+                window = info.Window;
+                recheckAt = info.RecheckAt;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -291,13 +298,14 @@ internal sealed class AutoHttpsService : BackgroundService
             }
         }
 
-        return RenewalCalculator.ComputeRenewalTime(
+        DateTimeOffset renewAt = RenewalCalculator.ComputeRenewalTime(
             current.NotBefore,
             current.NotAfter,
             window,
             current.Leaf.SerialNumberBytes.Span,
             _options.RenewalThreshold,
             now);
+        return (renewAt, recheckAt);
     }
 
     /// <summary>
