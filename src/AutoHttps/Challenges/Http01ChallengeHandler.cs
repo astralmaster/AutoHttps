@@ -1,80 +1,46 @@
-using System;
-using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using AutoHttps.Acme;
 
 namespace AutoHttps.Challenges;
 
-internal sealed class Http01ChallengeStore
-{
-    private readonly ConcurrentDictionary<string, PendingChallenge> _pending = new(StringComparer.Ordinal);
-
-    public int Count => _pending.Count;
-
-    public void Add(string token, string keyAuthorization) =>
-        _pending[token] = new PendingChallenge(keyAuthorization);
-
-    public void Remove(string token) => _pending.TryRemove(token, out _);
-
-    public bool TryGet(string token, [NotNullWhen(true)] out string? keyAuthorization)
-    {
-        if (_pending.TryGetValue(token, out PendingChallenge? pending))
-        {
-            pending.MarkRequested();
-            keyAuthorization = pending.KeyAuthorization;
-            return true;
-        }
-
-        keyAuthorization = null;
-        return false;
-    }
-
-    /// <summary>Whether anything ever asked this process for the token.</summary>
-    public bool WasRequested(string token) =>
-        _pending.TryGetValue(token, out PendingChallenge? pending) && pending.WasRequested;
-
-    private sealed class PendingChallenge
-    {
-        private int _requested;
-
-        public PendingChallenge(string keyAuthorization) => KeyAuthorization = keyAuthorization;
-
-        public string KeyAuthorization { get; }
-
-        public bool WasRequested => Volatile.Read(ref _requested) != 0;
-
-        public void MarkRequested() => Volatile.Write(ref _requested, 1);
-    }
-}
-
 internal sealed class Http01ChallengeHandler : IChallengeHandler
 {
-    private readonly Http01ChallengeStore _store;
+    private readonly IHttp01ChallengeStore _store;
+    private readonly Http01RequestProbe _probe;
 
-    public Http01ChallengeHandler(Http01ChallengeStore store) => _store = store;
+    public Http01ChallengeHandler(IHttp01ChallengeStore store, Http01RequestProbe probe)
+    {
+        _store = store;
+        _probe = probe;
+    }
 
     public string ChallengeType => ChallengeTypes.Http01;
 
     public bool CanHandle(string identifierType) =>
         identifierType is AcmeIdentifierTypes.Dns or AcmeIdentifierTypes.Ip;
 
-    public Task PrepareAsync(ChallengeContext context, CancellationToken cancellationToken)
-    {
-        _store.Add(context.Token, context.KeyAuthorization);
-        return Task.CompletedTask;
-    }
+    public Task PrepareAsync(ChallengeContext context, CancellationToken cancellationToken) =>
+        _store.AddAsync(context.Token, context.KeyAuthorization, cancellationToken);
 
-    public Task CleanupAsync(ChallengeContext context, CancellationToken cancellationToken)
+    public async Task CleanupAsync(ChallengeContext context, CancellationToken cancellationToken)
     {
-        _store.Remove(context.Token);
-        return Task.CompletedTask;
+        // Forget the token even if the store cannot be reached. A cleanup failure is caught and logged
+        // by the caller, so without this a store that keeps throwing would leave an entry behind on
+        // every attempt.
+        try
+        {
+            await _store.RemoveAsync(context.Token, cancellationToken);
+        }
+        finally
+        {
+            _probe.Forget(context.Token);
+        }
     }
 
     public string? DescribeFailure(ChallengeContext context, AcmeException failure)
     {
-        if (_store.WasRequested(context.Token))
+        if (_probe.WasServed(context.Token))
         {
             return null;
         }
@@ -84,10 +50,7 @@ internal sealed class Http01ChallengeHandler : IChallengeHandler
         // proxy that does not exist costs more time than saying nothing would have.
         return failure.ErrorType switch
         {
-            AcmeErrorTypes.Unauthorized or AcmeErrorTypes.IncorrectResponse =>
-                "the challenge response was published but nothing ever requested it from this process, " +
-                "so something in front of the application answered /.well-known/acme-challenge instead. " +
-                "Look for a proxy, ingress controller or CDN intercepting that path",
+            AcmeErrorTypes.Unauthorized or AcmeErrorTypes.IncorrectResponse => AnsweredBySomethingElse(),
             AcmeErrorTypes.Dns =>
                 "the authority could not resolve the name, so it never reached this application. " +
                 "Check that public DNS for this name resolves to this host",
@@ -95,9 +58,24 @@ internal sealed class Http01ChallengeHandler : IChallengeHandler
                 "the authority could not connect, so it never reached this application. An http-01 " +
                 "validation always starts on port 80, so check that port 80 is reachable from the " +
                 "public internet and forwarded to this process",
-            _ =>
-                "the challenge response was published but nothing ever requested it from this process, " +
-                "so the authority never reached the application",
+            _ => _store.IsProcessLocal
+                ? "the challenge response was published but nothing ever requested it from this process, " +
+                  "so the authority never reached the application"
+                : "the challenge response was published but nothing requested it from this process. The " +
+                  "challenge store is shared, so another replica may have served it and the authority " +
+                  "still never reached any of them",
         };
     }
+
+    // The authority reached something and did not get the answer it expected. With a store private to
+    // this process, nothing asking here means something in front of the application answered instead.
+    // With a shared store another replica could legitimately have answered, so that conclusion would be
+    // wrong; what is worth checking then is that every replica reaches the same store.
+    private string AnsweredBySomethingElse() => _store.IsProcessLocal
+        ? "the challenge response was published but nothing ever requested it from this process, " +
+          "so something in front of the application answered /.well-known/acme-challenge instead. " +
+          "Look for a proxy, ingress controller or CDN intercepting that path"
+        : "the challenge response was published but nothing requested it from this process, and the " +
+          "answer the authority did get was wrong. Check that every replica reads the same challenge " +
+          "store, and that no proxy, ingress controller or CDN answers /.well-known/acme-challenge";
 }

@@ -91,7 +91,8 @@ public static class AutoHttpsServiceCollectionExtensions
         services.TryAddSingleton<IDistributedLock>(static provider => new FileSystemLock(ResolveStorageDirectory(provider)));
 
         services.TryAddSingleton<CertificateSelector>();
-        services.TryAddSingleton<Http01ChallengeStore>();
+        services.TryAddSingleton<IHttp01ChallengeStore, InMemoryHttp01ChallengeStore>();
+        services.TryAddSingleton<Http01RequestProbe>();
         services.TryAddSingleton<AcmeSession>();
         services.TryAddSingleton<CertificateAcquirer>();
 

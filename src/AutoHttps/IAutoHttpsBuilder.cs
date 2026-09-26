@@ -28,6 +28,16 @@ public interface IAutoHttpsBuilder
         where TStore : class, IAccountKeyStore;
 
     /// <summary>
+    /// Replaces the store holding pending <c>http-01</c> challenge answers. Replicas behind a single DNS
+    /// name need a store every one of them can read, because the authority's validation request lands on
+    /// whichever replica the load balancer picks.
+    /// </summary>
+    /// <typeparam name="TStore">The store implementation.</typeparam>
+    /// <returns>The builder.</returns>
+    IAutoHttpsBuilder UseHttp01ChallengeStore<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStore>()
+        where TStore : class, IHttp01ChallengeStore;
+
+    /// <summary>
     /// Replaces the lock that stops several instances from ordering the same certificate at once.
     /// </summary>
     /// <typeparam name="TLock">The lock implementation.</typeparam>
@@ -101,6 +111,13 @@ internal sealed class AutoHttpsBuilder : IAutoHttpsBuilder
         where TStore : class, IAccountKeyStore
     {
         Services.Replace(ServiceDescriptor.Singleton<IAccountKeyStore, TStore>());
+        return this;
+    }
+
+    public IAutoHttpsBuilder UseHttp01ChallengeStore<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStore>()
+        where TStore : class, IHttp01ChallengeStore
+    {
+        Services.Replace(ServiceDescriptor.Singleton<IHttp01ChallengeStore, TStore>());
         return this;
     }
 

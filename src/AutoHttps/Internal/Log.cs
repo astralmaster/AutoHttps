@@ -212,4 +212,11 @@ internal static partial class Log
                   "endpoints, bind them with UseUrls or Kestrel:Endpoints, or set ConfigureKestrel to false and " +
                   "wire endpoints with listenOptions.UseAutoHttps.")]
     public static partial void KestrelDefaultsNotApplied(ILogger logger, string domains);
+
+    [LoggerMessage(
+        EventId = 143,
+        Level = LogLevel.Warning,
+        Message = "The http-01 challenge store could not be read for token {Token}, so this instance " +
+                  "cannot answer the authority's validation request.")]
+    public static partial void Http01ChallengeStoreUnavailable(ILogger logger, string token, Exception exception);
 }

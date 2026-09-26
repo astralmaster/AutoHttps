@@ -73,7 +73,7 @@ Core shared framework, including a complete RFC 8555 client written for this lib
 | **Authorities** | Let's Encrypt, ZeroSSL, Google Trust Services, or any ACME directory |
 | **External account binding** | Yes, required by ZeroSSL and Google Trust Services |
 | **Keys** | ECDSA P-256 (default), P-384, RSA 2048/3072/4096 |
-| **Multiple instances** | Locked and shared through the certificate store |
+| **Multiple instances** | Locked, and certificates and `http-01` answers shared through the stores |
 | **Observability** | Health check, metrics, and callbacks on change and failure |
 | **Dependencies** | None |
 
@@ -166,6 +166,7 @@ detail.
 | `PersistCertificatesTo<T>()` | Keep certificates somewhere other than the filesystem. See [Storage](#storage). |
 | `PersistAccountKeyTo<T>()` | Keep the ACME account key somewhere other than the filesystem. |
 | `UseDistributedLock<T>()` | Coordinate instances that do not share a filesystem. See [Running several instances](#running-several-instances). |
+| `UseHttp01ChallengeStore<T>()` | Let any replica answer an `http-01` challenge. See [Answering http-01 from any replica](#answering-http-01-from-any-replica). |
 | `UseDnsChallengeProvider<T>()` | Publish DNS TXT records for `dns-01` and wildcards. See [Wildcards and DNS challenges](#wildcards-and-dns-challenges). |
 | `AddCertificateListener<T>()` | Run code when the served certificate changes or an order fails. See [Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes). |
 | `UseDevelopmentCertificate()` | Serve a locally trusted certificate in Development instead of ordering one. See [Local development](#local-development). |
@@ -343,19 +344,34 @@ builder.Services
     .UseDistributedLock<MyRedisLock>();
 ```
 
-> **With `http-01`, replicas behind a single DNS name need care.** The instance that wins the lock is
-> not necessarily the one the certificate authority's validation request reaches. Only the winner
-> knows the challenge response, so a request landing on any other replica gets a 404 and that
-> authorization fails. The order is retried and eventually succeeds, but each miss spends one of the
-> authority's failed-validation attempts (Let's Encrypt allows five per account, per hostname, per
-> hour), and it repeats at every renewal. Measured with three replicas: eight failed validations to
-> issue one certificate.
->
-> Pick one of these:
-> - **Use `dns-01`.** The challenge never touches the replicas, so the problem disappears entirely.
->   This is the recommended option for anything scaled horizontally.
-> - **Route `/.well-known/acme-challenge` to a single replica** at your load balancer.
-> - **Run one instance** that owns certificates and share the store with the rest read-only.
+### Answering http-01 from any replica
+
+The instance that wins the lock is not necessarily the one the certificate authority's validation
+request reaches, so the answer to a challenge has to be readable by every replica rather than only by
+the one that ordered. `UseRedis` arranges that, along with the certificate and the account key:
+
+```csharp
+builder.Services
+    .AddAutoHttps(options => { /* ... */ })
+    .UseRedis("localhost:6379");
+```
+
+To share only the challenges and keep certificates wherever they already are, implement
+`IHttp01ChallengeStore` and register it on its own:
+
+```csharp
+builder.Services
+    .AddAutoHttps(options => { /* ... */ })
+    .UseHttp01ChallengeStore<MyChallengeStore>();
+```
+
+Without a shared store, a validation request landing on any replica other than the one that ordered
+gets a 404 and that authorization fails. The order is retried and eventually succeeds, but each miss
+spends one of the authority's failed-validation attempts (Let's Encrypt allows five per account, per
+hostname, per hour), and it repeats at every renewal. Measured with three replicas and the default
+per-process store: eight failed validations to issue one certificate.
+
+`dns-01` avoids the question altogether, because the challenge never touches the replicas.
 
 ## Configuring Kestrel yourself
 
