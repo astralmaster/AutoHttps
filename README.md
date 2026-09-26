@@ -327,11 +327,15 @@ adds what only it can know:
 |---|---|
 | `could not resolve URL` | the domain has no A or AAAA record |
 | `dial tcp <ip>:<port>: connect:` | the name resolves to `<ip>` but nothing there accepts the connection: wrong record, or a firewall |
-| `returned 404`, followed by event 127 naming a proxy | something in front of the application answered instead of it: a proxy, ingress or CDN is intercepting the challenge path |
+| `returned 404`, followed by event 127 | something in front of the application answered instead of it: a proxy, ingress or CDN is intercepting the challenge path. With a shared challenge store, event 127 asks instead whether every replica reaches the store, because another replica may legitimately have answered |
 | `key authorization file ... did not match` | the domain points at a different server; the message quotes what came back |
 
 Fixing the cause is enough. AutoHttps retries on its own schedule and picks the fix up without a
 restart.
+
+When the message is not enough on its own, AutoHttps also checks its own configuration and
+surroundings after the first failure and writes what it finds to the log, including the DNS and DNSSEC
+answers the authority would have got. See [Diagnosing a failure](#diagnosing-a-failure).
 
 ## Running several instances
 
