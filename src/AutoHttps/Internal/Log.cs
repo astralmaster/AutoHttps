@@ -219,4 +219,21 @@ internal static partial class Log
         Message = "The http-01 challenge store could not be read for token {Token}, so this instance " +
                   "cannot answer the authority's validation request.")]
     public static partial void Http01ChallengeStoreUnavailable(ILogger logger, string token, Exception exception);
+
+    [LoggerMessage(
+        EventId = 144,
+        Level = LogLevel.Warning,
+        Message = "The order failed, so AutoHttps checked its own configuration and surroundings and found " +
+                  "something to look at.{Report}")]
+    public static partial void DiagnosticsFoundProblems(ILogger logger, string report);
+
+    [LoggerMessage(
+        EventId = 145,
+        Level = LogLevel.Information,
+        Message = "The order failed, so AutoHttps checked its own configuration and surroundings and found " +
+                  "nothing wrong with them.{Report}")]
+    public static partial void DiagnosticsFoundNothing(ILogger logger, string report);
+
+    [LoggerMessage(EventId = 146, Level = LogLevel.Debug, Message = "The diagnostics could not be run.")]
+    public static partial void DiagnosticsFailed(ILogger logger, Exception exception);
 }

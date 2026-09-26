@@ -186,4 +186,16 @@ public sealed class AutoHttpsOptions
     /// already serves <c>/.well-known/acme-challenge</c>.
     /// </summary>
     public bool HandleHttp01Requests { get; set; } = true;
+
+    /// <summary>
+    /// Whether to run <see cref="IAutoHttpsDiagnostics"/> once, by itself, after the first order failure
+    /// and write the report to the log. Defaults to <see langword="true"/>.
+    /// </summary>
+    /// <remarks>
+    /// Nothing runs while orders succeed, so this costs nothing until something is wrong, and then it
+    /// reports the cause rather than leaving only the authority's account of it. The checks are read
+    /// only. The DNS ones need <see cref="DnsPropagationResolver"/> and are skipped without it, so this
+    /// does not make AutoHttps query DNS that it otherwise would not.
+    /// </remarks>
+    public bool DiagnoseOrderFailures { get; set; } = true;
 }

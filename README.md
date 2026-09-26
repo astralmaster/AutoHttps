@@ -75,6 +75,7 @@ Core shared framework, including a complete RFC 8555 client written for this lib
 | **Keys** | ECDSA P-256 (default), P-384, RSA 2048/3072/4096 |
 | **Multiple instances** | Locked, and certificates and `http-01` answers shared through the stores |
 | **Observability** | Health check, metrics, and callbacks on change and failure |
+| **Diagnosis** | Self-checks DNS, DNSSEC, CAA, port 80 and the challenge path when an order fails |
 | **Dependencies** | None |
 
 ## Configuration
@@ -154,6 +155,7 @@ The quick start covers the common case. These are the rest:
 | `RequireCertificateOnStartup` | `false` | Stop the application if no certificate is obtained within `StartupCertificateTimeout`. |
 | `StartupCertificateTimeout` | 2m | How long to wait for the first certificate before stopping, when it is required. |
 | `HandleHttp01Requests` | `true` | Answer `/.well-known/acme-challenge` from the pipeline. |
+| `DiagnoseOrderFailures` | `true` | After the first failed order, check the configuration and surroundings once and log the result. See [Diagnosing a failure](#diagnosing-a-failure). |
 
 ### Builder methods
 
@@ -532,6 +534,7 @@ exists for diagnosis, not alerting.
 | 130 | Information | A development certificate is being served and ACME is disabled in this environment. |
 | 132 | Information | The alternate certificate chain requested with `PreferredChain` is being served. |
 | 138 | Information | A certificate was revoked at the authority. |
+| 145 | Information | The diagnostics ran after a failed order and found nothing wrong. See "Diagnosing a failure". |
 | 110 | Warning | An order failed and will be retried. The reason is in the message; the stack trace is logged separately at Debug as event 124. |
 | 112 | Warning | A self-signed fallback is being served, logged once rather than per handshake. |
 | 114 | Warning | The store could not be read; continuing without a cached certificate. |
@@ -546,6 +549,8 @@ exists for diagnosis, not alerting.
 | 131 | Warning | A development certificate was asked for but none is installed. Run `dotnet dev-certs https --trust`. The self-signed fallback is served meanwhile. |
 | 133 | Warning | `PreferredChain` named a chain the authority does not offer. The default chain is served instead. |
 | 134 | Warning | A `dns-01` record was not visible through `DnsPropagationResolver` before the timeout. Validation was requested anyway. |
+| 143 | Warning | The `http-01` challenge store could not be read, so this instance could not answer a validation. With a shared store, check that every replica reaches it. |
+| 144 | Warning | The diagnostics ran after a failed order and found something to look at. The report is in the message. See "Diagnosing a failure". |
 | 122 | Error | Something unexpected went wrong, including a storage directory that cannot be written. The application keeps running. |
 | 137 | Critical | No certificate was obtained within `StartupCertificateTimeout` and `RequireCertificateOnStartup` is set. The application is being stopped. |
 
@@ -560,6 +565,45 @@ you want, turn it down without affecting AutoHttps' own logging:
 ```json
 { "Logging": { "LogLevel": { "System.Net.Http.HttpClient.AutoHttps.Acme": "Warning" } } }
 ```
+
+## Diagnosing a failure
+
+An authority only reports what it saw from outside, which is rarely enough to act on. When the first
+order fails, AutoHttps checks its own configuration and surroundings once and writes the result to the
+log as event **144**, or **145** when it finds nothing wrong. Nothing runs while orders succeed. Turn it
+off with `DiagnoseOrderFailures = false`.
+
+You can also run it yourself, which is the output to paste into an issue:
+
+```csharp
+var diagnostics = app.Services.GetRequiredService<IAutoHttpsDiagnostics>();
+AutoHttpsDiagnosticsReport report = await diagnostics.RunAsync();
+
+Console.WriteLine(report);
+```
+
+Every check is read only. What it looks at:
+
+| Check | What it answers |
+|---|---|
+| `configuration` | Whether the name count fits the requested profile, and whether an IP address identifier has the profile and challenge type it needs. |
+| `storage` | Whether the certificate can actually be written. |
+| `port-80` | Whether anything is bound to port 80, where an `http-01` validation always starts. A warning, not a failure, because a proxy forwarding 80 here is normal. |
+| `authority` | Whether the directory is reachable, and whether it offers renewal information. |
+| `clock` | How far this host's clock is from the authority's. A large difference makes it reject request signatures. |
+| `account-binding` | Whether the authority requires external account binding and whether one is configured. |
+| `profile` | Whether the authority offers the profile you asked for. |
+| `dns:<name>` | Whether the name resolves, and whether the resolver answers `SERVFAIL`, which almost always means a broken DNSSEC chain. A missing AAAA record is reported as normal rather than as a problem. |
+| `caa:<name>` | Whether CAA records permit this authority, following the record set on the closest ancestor that has one. |
+| `challenge-path:<name>` | Publishes a token of its own and fetches it back over the public name, which is the only check that exercises the whole path the authority takes. |
+
+The DNS and CAA checks need `DnsPropagationResolver` and are skipped without it, because AutoHttps makes
+no DNS queries of its own unless you configure a resolver.
+
+One thing no client can check for you: since 2025 an authority validates from several network
+perspectives at least 500km apart, and it does not publish where from. A passing `challenge-path` check
+proves the path works from this host, not that the authority can reach it, so a country block, an IP
+allowlist or a CDN geo rule can still fail an otherwise healthy setup.
 
 ## Health, metrics and reacting to changes
 

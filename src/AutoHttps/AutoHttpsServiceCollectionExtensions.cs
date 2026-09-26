@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 using AutoHttps.Certificates;
 using AutoHttps.Challenges;
+using AutoHttps.Diagnostics;
 using AutoHttps.Hosting;
 using AutoHttps.Internal;
 using AutoHttps.Renewal;
@@ -93,6 +94,9 @@ public static class AutoHttpsServiceCollectionExtensions
         services.TryAddSingleton<CertificateSelector>();
         services.TryAddSingleton<IHttp01ChallengeStore, InMemoryHttp01ChallengeStore>();
         services.TryAddSingleton<Http01RequestProbe>();
+
+        services.TryAddSingleton<DnsLookup>();
+        services.TryAddSingleton<IAutoHttpsDiagnostics, Diagnostics.AutoHttpsDiagnostics>();
         services.TryAddSingleton<AcmeSession>();
         services.TryAddSingleton<CertificateAcquirer>();
 

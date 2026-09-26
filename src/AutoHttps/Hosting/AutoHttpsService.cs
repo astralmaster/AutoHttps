@@ -33,6 +33,7 @@ internal sealed class AutoHttpsService : BackgroundService
     private readonly AutoHttpsMetrics _metrics;
     private readonly IHostEnvironment _environment;
     private readonly DevelopmentCertificateSource _developmentCertificate;
+    private readonly IAutoHttpsDiagnostics _diagnostics;
 
     private readonly TaskCompletionSource _firstCertificate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -41,6 +42,7 @@ internal sealed class AutoHttpsService : BackgroundService
     private DateTimeOffset _lastIssued;
     private TimeSpan _nextRetry;
     private DateTimeOffset _rateLimitedUntil;
+    private int _diagnosed;
 
     public AutoHttpsService(
         IOptions<AutoHttpsOptions> options,
@@ -55,7 +57,8 @@ internal sealed class AutoHttpsService : BackgroundService
         CertificateEventPublisher events,
         AutoHttpsMetrics metrics,
         IHostEnvironment environment,
-        DevelopmentCertificateSource developmentCertificate)
+        DevelopmentCertificateSource developmentCertificate,
+        IAutoHttpsDiagnostics diagnostics)
     {
         _options = options.Value;
         _acquirer = acquirer;
@@ -70,6 +73,7 @@ internal sealed class AutoHttpsService : BackgroundService
         _metrics = metrics;
         _environment = environment;
         _developmentCertificate = developmentCertificate;
+        _diagnostics = diagnostics;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -493,14 +497,47 @@ internal sealed class AutoHttpsService : BackgroundService
         return _events.NotifyChangedAsync(context, cancellationToken);
     }
 
-    private Task ReportFailureAsync(Exception exception, CancellationToken cancellationToken)
+    private async Task ReportFailureAsync(Exception exception, CancellationToken cancellationToken)
     {
         string reason = Describe(exception);
         _state.OrderFailed(_time.GetUtcNow(), reason);
         _metrics.RecordFailure();
 
         var context = new CertificateFailedContext(_state.Current.Domains, reason, exception);
-        return _events.NotifyFailedAsync(context, cancellationToken);
+        await _events.NotifyFailedAsync(context, cancellationToken);
+
+        await DiagnoseOnceAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Reports what is wrong the first time an order fails. The authority only says what it saw from
+    /// outside, which is rarely enough to act on, and running this on every retry would be noise.
+    /// </summary>
+    private async Task DiagnoseOnceAsync(CancellationToken cancellationToken)
+    {
+        if (!_options.DiagnoseOrderFailures || Interlocked.Exchange(ref _diagnosed, 1) == 1)
+        {
+            return;
+        }
+
+        try
+        {
+            AutoHttpsDiagnosticsReport report = await _diagnostics.RunAsync(cancellationToken);
+
+            if (report.Outcome is AutoHttpsCheckOutcome.Failed or AutoHttpsCheckOutcome.Warning)
+            {
+                Log.DiagnosticsFoundProblems(_logger, Environment.NewLine + report);
+            }
+            else
+            {
+                Log.DiagnosticsFoundNothing(_logger, Environment.NewLine + report);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Diagnosing a failure must never make the failure worse.
+            Log.DiagnosticsFailed(_logger, ex);
+        }
     }
 
     private void LogSchedule(string description, DateTimeOffset renewAt)
