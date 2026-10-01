@@ -74,6 +74,33 @@ public class AutoHttpsMetricsTests
         Assert.Equal(1, host.CountFor("failure"));
     }
 
+    [Fact]
+    public void TheFailureGaugeReportsTheCurrentRunOfFailures()
+    {
+        using var host = new MetricsHost(Now);
+
+        Assert.Equal(0, Assert.Single(host.ReadFailureGauge()));
+
+        host.State.OrderFailed(Now, "Connection refused.");
+        host.State.OrderFailed(Now, "Connection refused.");
+
+        Assert.Equal(2, Assert.Single(host.ReadFailureGauge()));
+    }
+
+    [Fact]
+    public void TheFailureGaugeReturnsToZeroOnceRenewalSucceeds()
+    {
+        // This is what the counter cannot answer. A count of failures stays high after the cause is
+        // fixed, so an alert on it keeps firing; this one clears, which is what makes it alertable.
+        using var host = new MetricsHost(Now);
+        host.State.OrderFailed(Now, "Connection refused.");
+        host.State.OrderFailed(Now, "Connection refused.");
+
+        host.State.OrderSucceeded();
+
+        Assert.Equal(0, Assert.Single(host.ReadFailureGauge()));
+    }
+
     private static ServerCertificate SelfSigned(FakeTimeProvider time, TimeSpan lifetime) => new(
         CertificateFactory.CreateSelfSigned(["app.example.com"], time.GetUtcNow(), lifetime),
         new X509Certificate2Collection());
@@ -83,6 +110,7 @@ public class AutoHttpsMetricsTests
         private readonly ServiceProvider _services;
         private readonly MeterListener _listener = new();
         private readonly List<double> _gauge = [];
+        private readonly List<int> _failureGauge = [];
         private readonly Dictionary<string, long> _counts = new(StringComparer.Ordinal);
 
         public MetricsHost(DateTimeOffset now)
@@ -110,6 +138,7 @@ public class AutoHttpsMetricsTests
                     }
                 }
             });
+            _listener.SetMeasurementEventCallback<int>((_, measurement, _, _) => _failureGauge.Add(measurement));
             _listener.SetMeasurementEventCallback<long>((_, measurement, tags, _) =>
             {
                 foreach (KeyValuePair<string, object?> tag in tags)
@@ -136,6 +165,13 @@ public class AutoHttpsMetricsTests
             _gauge.Clear();
             _listener.RecordObservableInstruments();
             return _gauge;
+        }
+
+        public IReadOnlyList<int> ReadFailureGauge()
+        {
+            _failureGauge.Clear();
+            _listener.RecordObservableInstruments();
+            return _failureGauge;
         }
 
         public long CountFor(string outcome) => _counts.GetValueOrDefault(outcome);

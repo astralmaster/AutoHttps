@@ -26,7 +26,10 @@ public sealed class AutoHttpsCertificateStatus
         DateTimeOffset? notBefore,
         DateTimeOffset? notAfter,
         string? thumbprint,
-        DateTimeOffset? renewalScheduledAt)
+        DateTimeOffset? renewalScheduledAt,
+        int consecutiveFailures,
+        DateTimeOffset? lastFailureAt,
+        string? lastFailureReason)
     {
         Domains = domains;
         HasCertificate = hasCertificate;
@@ -35,6 +38,9 @@ public sealed class AutoHttpsCertificateStatus
         NotAfter = notAfter;
         Thumbprint = thumbprint;
         RenewalScheduledAt = renewalScheduledAt;
+        ConsecutiveFailures = consecutiveFailures;
+        LastFailureAt = lastFailureAt;
+        LastFailureReason = lastFailureReason;
     }
 
     /// <summary>The domains AutoHttps is managing.</summary>
@@ -62,4 +68,19 @@ public sealed class AutoHttpsCertificateStatus
     /// When AutoHttps next plans to renew, or <see langword="null"/> before the first renewal check.
     /// </summary>
     public DateTimeOffset? RenewalScheduledAt { get; }
+
+    /// <summary>
+    /// How many renewal attempts have failed in a row, back to zero as soon as a certificate is in
+    /// hand again. One failure is routine and is retried; a run of them that keeps growing is not.
+    /// </summary>
+    public int ConsecutiveFailures { get; }
+
+    /// <summary>When the most recent attempt failed, or <see langword="null"/> if none has.</summary>
+    public DateTimeOffset? LastFailureAt { get; }
+
+    /// <summary>
+    /// Why the most recent attempt failed, or <see langword="null"/> if none has. This is the same
+    /// sentence logged as event 110.
+    /// </summary>
+    public string? LastFailureReason { get; }
 }

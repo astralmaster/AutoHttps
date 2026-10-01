@@ -149,6 +149,51 @@ public class OptionsValidatorTests
         AssertFails(options, "RenewalThreshold");
     }
 
+    [Theory]
+    [InlineData(1d)]
+    [InlineData(-0.5d)]
+    [InlineData(1.5d)]
+    [InlineData(double.NaN)]
+    public void AnExplicitNearExpiryFractionMustBeAProperFraction(double fraction)
+    {
+        AutoHttpsOptions options = Valid();
+        options.NearExpiryWarningFraction = fraction;
+
+        AssertFails(options, "NearExpiryWarningFraction");
+    }
+
+    [Fact]
+    public void ANearExpiryFractionAtOrAboveTheRenewalThresholdIsRejected()
+    {
+        // It would report Degraded before renewal had been attempted once, and never clear, so the
+        // signal would be useless from the first day rather than wrong only during an outage.
+        AutoHttpsOptions options = Valid();
+        options.RenewalThreshold = 1d / 3d;
+        options.NearExpiryWarningFraction = 1d / 3d;
+
+        AssertFails(options, "NearExpiryWarningFraction");
+    }
+
+    [Fact]
+    public void ZeroTurnsTheNearExpiryWarningOffRatherThanFailing()
+    {
+        AutoHttpsOptions options = Valid();
+        options.NearExpiryWarningFraction = 0;
+
+        Assert.True(_validator.Validate(null, options).Succeeded);
+    }
+
+    [Fact]
+    public void TheDefaultNearExpiryFractionNeverConflictsWithALoweredThreshold()
+    {
+        // The default is derived from the threshold rather than fixed, so lowering the threshold
+        // cannot turn a valid configuration into a startup failure on upgrade.
+        AutoHttpsOptions options = Valid();
+        options.RenewalThreshold = 0.05;
+
+        Assert.True(_validator.Validate(null, options).Succeeded);
+    }
+
     [Fact]
     public void NonPositiveIntervalsAreRejected()
     {

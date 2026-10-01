@@ -32,6 +32,15 @@ internal sealed class AutoHttpsMetrics : IDisposable
             "autohttps.certificate.renewals",
             unit: "{renewal}",
             description: "Certificate orders this instance completed, tagged by outcome.");
+
+        // The counter above cannot answer "is renewal broken right now", because a count of failures
+        // keeps rising after the cause is fixed. This is the alertable one: it returns to zero the
+        // moment a certificate is in hand again, so a threshold on it means renewal is failing now.
+        _meter.CreateObservableGauge(
+            "autohttps.certificate.renewal_failures",
+            ObserveConsecutiveFailures,
+            unit: "{failure}",
+            description: "Renewal attempts that have failed in a row, zero once one succeeds.");
     }
 
     public void RecordSuccess() =>
@@ -41,6 +50,8 @@ internal sealed class AutoHttpsMetrics : IDisposable
         _renewals.Add(1, new KeyValuePair<string, object?>("outcome", "failure"));
 
     public void Dispose() => _meter.Dispose();
+
+    private int ObserveConsecutiveFailures() => _state.Current.ConsecutiveFailures;
 
     private IEnumerable<Measurement<double>> ObserveExpiry()
     {

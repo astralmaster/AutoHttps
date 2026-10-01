@@ -43,6 +43,7 @@ internal sealed class AutoHttpsService : BackgroundService
     private TimeSpan _nextRetry;
     private DateTimeOffset _rateLimitedUntil;
     private int _diagnosed;
+    private bool _overdueReported;
 
     public AutoHttpsService(
         IOptions<AutoHttpsOptions> options,
@@ -129,7 +130,7 @@ internal sealed class AutoHttpsService : BackgroundService
             {
                 Log.UnexpectedFailure(_logger, description, _nextRetry, ex);
                 await DelayAsync(JitterRetry(), stoppingToken);
-                _nextRetry = Min(_nextRetry + _nextRetry, _options.MaxRetryDelay);
+                _nextRetry = Min(_nextRetry + _nextRetry, RetryCeiling());
             }
         }
     }
@@ -172,6 +173,8 @@ internal sealed class AutoHttpsService : BackgroundService
             case AcquisitionOutcome.Acquired:
                 _nextRetry = _options.InitialRetryDelay;
                 _lastIssued = _time.GetUtcNow();
+                _state.OrderSucceeded();
+                _overdueReported = false;
                 break;
 
             case AcquisitionOutcome.Deferred:
@@ -180,7 +183,7 @@ internal sealed class AutoHttpsService : BackgroundService
 
             case AcquisitionOutcome.Failed:
                 await DelayAsync(JitterRetry(), stoppingToken);
-                _nextRetry = Min(_nextRetry + _nextRetry, _options.MaxRetryDelay);
+                _nextRetry = Min(_nextRetry + _nextRetry, RetryCeiling());
                 break;
         }
     }
@@ -500,14 +503,64 @@ internal sealed class AutoHttpsService : BackgroundService
     private async Task ReportFailureAsync(Exception exception, CancellationToken cancellationToken)
     {
         string reason = Describe(exception);
-        _state.OrderFailed(_time.GetUtcNow(), reason);
+        DateTimeOffset now = _time.GetUtcNow();
+        _state.OrderFailed(now, reason);
         _metrics.RecordFailure();
+
+        ReportOverdue(now, reason);
 
         var context = new CertificateFailedContext(_state.Current.Domains, reason, exception);
         await _events.NotifyFailedAsync(context, cancellationToken);
 
         await DiagnoseOnceAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Escalates once failures have outlasted the runway the renewal threshold left. Event 110
+    /// already reports every attempt, which is the wrong thing to page on because most failures are
+    /// retried successfully; this fires only while the certificate in use is inside the near-expiry
+    /// window, and only once per run of failures, so a long outage does not become a stream of
+    /// identical errors.
+    /// </summary>
+    private void ReportOverdue(DateTimeOffset now, string reason)
+    {
+        AutoHttpsState.Snapshot snapshot = _state.Current;
+
+        if (_overdueReported || snapshot.Certificate is not { } certificate)
+        {
+            return;
+        }
+
+        bool overdue = RenewalRisk.IsOverdue(
+            now,
+            certificate.NotBefore,
+            certificate.NotAfter,
+            RenewalRisk.EffectiveNearExpiryFraction(_options.NearExpiryWarningFraction, _options.RenewalThreshold),
+            snapshot.ConsecutiveFailures);
+
+        if (!overdue)
+        {
+            return;
+        }
+
+        _overdueReported = true;
+        Log.RenewalOverdue(
+            _logger,
+            string.Join(", ", snapshot.Domains),
+            snapshot.ConsecutiveFailures,
+            certificate.NotAfter,
+            reason);
+    }
+
+    /// <summary>
+    /// The ceiling for the retry backoff. While a certificate is in hand the ceiling is also held to
+    /// a share of its lifetime, so a value chosen for a 90 day certificate does not leave a six day
+    /// one with only a couple of attempts between the renewal point and expiry.
+    /// </summary>
+    private TimeSpan RetryCeiling() =>
+        _current is { } certificate
+            ? RenewalRisk.RetryCeiling(_options.MaxRetryDelay, certificate.NotBefore, certificate.NotAfter)
+            : _options.MaxRetryDelay;
 
     /// <summary>
     /// Reports what is wrong the first time an order fails. The authority only says what it saw from

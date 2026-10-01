@@ -98,6 +98,26 @@ internal sealed class AutoHttpsOptionsValidator : IValidateOptions<AutoHttpsOpti
             failures.Add($"{nameof(AutoHttpsOptions.RenewalThreshold)} must be greater than 0 and less than 1.");
         }
 
+        // Only a value the application set explicitly is checked. The default is derived from the
+        // renewal threshold, so it cannot conflict with it whatever the threshold is set to.
+        if (options.NearExpiryWarningFraction is { } nearExpiry)
+        {
+            if (nearExpiry is < 0 or >= 1 || double.IsNaN(nearExpiry))
+            {
+                failures.Add(
+                    $"{nameof(AutoHttpsOptions.NearExpiryWarningFraction)} must be 0 or greater and less than 1. " +
+                    "Set it to 0 to turn the near-expiry warning off, or leave it unset to use half of " +
+                    $"{nameof(AutoHttpsOptions.RenewalThreshold)}.");
+            }
+            else if (nearExpiry > 0 && nearExpiry >= options.RenewalThreshold)
+            {
+                failures.Add(
+                    $"{nameof(AutoHttpsOptions.NearExpiryWarningFraction)} must be smaller than " +
+                    $"{nameof(AutoHttpsOptions.RenewalThreshold)}, otherwise the near-expiry warning fires before " +
+                    "renewal is attempted and never clears.");
+            }
+        }
+
         RequirePositive(failures, options.RenewalCheckInterval, nameof(AutoHttpsOptions.RenewalCheckInterval));
         RequirePositive(failures, options.ValidationTimeout, nameof(AutoHttpsOptions.ValidationTimeout));
         RequirePositive(failures, options.PollInterval, nameof(AutoHttpsOptions.PollInterval));

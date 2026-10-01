@@ -75,6 +75,7 @@ Core shared framework, including a complete RFC 8555 client written for this lib
 | **Keys** | ECDSA P-256 (default), P-384, RSA 2048/3072/4096 |
 | **Multiple instances** | Locked, and certificates and `http-01` answers shared through the stores |
 | **Observability** | Health check, metrics, and callbacks on change and failure |
+| **Stuck renewals** | Escalated once the certificate is near expiry, on thresholds proportional to its lifetime |
 | **Diagnosis** | Self-checks DNS, DNSSEC, CAA, port 80 and the challenge path when an order fails |
 | **Dependencies** | None |
 
@@ -145,11 +146,12 @@ The quick start covers the common case. These are the rest:
 | `DnsPropagationTimeout` | 2m | How long to poll `DnsPropagationResolver` before asking for validation anyway. |
 | `RenewalCheckInterval` | 6h | How often to re-evaluate renewal. |
 | `RenewalThreshold` | `1/3` | Fraction of lifetime that must remain, when the authority gives no advice. |
+| `NearExpiryWarningFraction` | half of `RenewalThreshold` | Fraction of lifetime below which the certificate counts as near expiry, for the health check and the overdue warning. `0` turns both off. See [When renewal keeps failing](#when-renewal-keeps-failing). |
 | `UseRenewalInformation` | `true` | Ask the authority when to renew (RFC 9773). |
 | `ValidationTimeout` | 5m | How long to wait for a challenge to validate. |
 | `PollInterval` | 2s | How often to poll the authority while waiting. |
 | `InitialRetryDelay` | 1m | First backoff after a failed order. |
-| `MaxRetryDelay` | 6h | Ceiling for that backoff. |
+| `MaxRetryDelay` | 6h | Ceiling for that backoff, held to a tenth of the certificate's lifetime when that is shorter. |
 | `ConfigureKestrel` | `true` | Attach the certificate selector to Kestrel's HTTPS defaults. |
 | `ServeFallbackCertificate` | `true` | Serve a self-signed certificate until a real one arrives. |
 | `RequireCertificateOnStartup` | `false` | Stop the application if no certificate is obtained within `StartupCertificateTimeout`. |
@@ -515,7 +517,10 @@ AutoHttps logs event 131 and serves the self-signed fallback so the app still st
 
 Certificate management never takes the application down. Failed orders are retried with exponential
 backoff between `InitialRetryDelay` and `MaxRetryDelay`, jittered so that instances which failed at the
-same moment do not retry in lockstep and synchronise into the authority's rate limit; a store that
+same moment do not retry in lockstep and synchronise into the authority's rate limit. While a
+certificate is in hand the ceiling is also held to a tenth of that certificate's lifetime, so a value
+chosen for a 90 day certificate does not leave a six day one with two attempts between the renewal
+point and expiry. A store that
 cannot be written is logged and
 the certificate stays in use; an unexpected error is logged and retried. When the authority answers
 with a rate limit and a `Retry-After`, that instruction wins over the local backoff. AutoHttps paces
@@ -556,11 +561,15 @@ exists for diagnosis, not alerting.
 | 143 | Warning | The `http-01` challenge store could not be read, so this instance could not answer a validation. With a shared store, check that every replica reaches it. |
 | 144 | Warning | The diagnostics ran after a failed order and found something to look at. The report is in the message. See "Diagnosing a failure". |
 | 122 | Error | Something unexpected went wrong, including a storage directory that cannot be written. The application keeps running. |
+| 147 | Error | Renewal is overdue: attempts keep failing and the certificate in use is near expiry, so it will not be replaced in time. Logged once per run of failures. See [When renewal keeps failing](#when-renewal-keeps-failing). |
 | 137 | Critical | No certificate was obtained within `StartupCertificateTimeout` and `RequireCertificateOnStartup` is set. The application is being stopped. |
 
-If you alert on one thing, alert on **110** and **122**. For a readiness signal and certificate
-metrics, see [Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes). A
-certificate expiry monitor pointed at your own domain is still a good external backstop.
+If you alert on one thing, alert on **147**: it means a certificate is going to expire rather than
+that an attempt failed. Event **110** fires on every failed attempt, most of which are retried
+successfully, so it suits a dashboard better than a pager. **122** is worth alerting on too. For a
+readiness signal and certificate metrics, see
+[Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes). A certificate
+expiry monitor pointed at your own domain is still a good external backstop.
 
 AutoHttps reaches the authority through a named `HttpClient`, and `IHttpClientFactory` logs every
 request at Information under `System.Net.Http.HttpClient.AutoHttps.Acme`. If that is noisier than
@@ -569,6 +578,41 @@ you want, turn it down without affecting AutoHttps' own logging:
 ```json
 { "Logging": { "LogLevel": { "System.Net.Http.HttpClient.AutoHttps.Acme": "Warning" } } }
 ```
+
+## When renewal keeps failing
+
+A single failed order is not worth waking anyone for: it is retried, and it usually succeeds. What is
+worth waking someone for is renewal that has been failing long enough that the certificate is going
+to expire. Let's Encrypt stopped sending expiry notifications on 2025-06-04, so nothing outside the
+process notices that on your behalf.
+
+AutoHttps separates the two. Every failed attempt is event **110**. Once attempts keep failing and the
+certificate in use has entered its near-expiry window, it logs event **147** at Error, once per run of
+failures rather than once per attempt, and the health check turns Degraded with the reason. A
+successful renewal clears all of it, including the failure count.
+
+Near expiry is a fraction of the certificate's lifetime rather than a fixed number of days, because
+one span cannot serve both a 90 day certificate and a six day one. `NearExpiryWarningFraction`
+defaults to half of `RenewalThreshold`, which is a sixth of the lifetime at the defaults: 15 days of a
+90 day certificate, about 27 hours of a 160 hour one. Renewal starts at the threshold, so a
+certificate that renews on time never reaches the window, and reaching it means renewal has been
+failing for as long as the threshold left to spare. Set it to `0` to turn the warning and the health
+degradation off.
+
+The retry ceiling is proportional for the same reason. `MaxRetryDelay` still applies, but while a
+certificate is in hand the delay is also held to a tenth of that certificate's lifetime, so a ceiling
+chosen for a 90 day certificate does not leave a six day one with two attempts between the renewal
+point and expiry.
+
+Three places report it, and they answer different questions:
+
+- Event **147** says a certificate is going to expire. This is the one to page on.
+- `autohttps.certificate.renewal_failures` is the count of attempts that have failed in a row, and it
+  returns to zero as soon as one succeeds, so a threshold on it means renewal is failing *now*. The
+  `autohttps.certificate.renewals` counter cannot answer that, because a count of past failures keeps
+  rising after the cause is fixed.
+- The health check carries `consecutive_failures` and `last_failure_reason` in its data, so a
+  readiness probe shows why without reading the log.
 
 ## Diagnosing a failure
 
@@ -632,12 +676,15 @@ builder.Services.AddHealthChecks()
     .AddAutoHttps(missingCertificateStatus: HealthStatus.Unhealthy);
 ```
 
-Pass `nearExpiryWarning` to report Degraded once a certificate has less than a given time left. It is
-off by default: a threshold that suits a 90 day certificate is wrong for a six day one.
+It also reports Degraded once the certificate is near expiry, which is a fraction of its lifetime and
+is on by default, and says so with the failure count and reason when renewal is what put it there.
+See [When renewal keeps failing](#when-renewal-keeps-failing). Pass `nearExpiryWarning` to add a fixed
+span on top, for example to report Degraded with less than 20 days left whatever the lifetime;
+whichever threshold comes first wins.
 
 ### Metrics
 
-AutoHttps publishes two instruments through a meter named `AutoHttps`, the value of
+AutoHttps publishes three instruments through a meter named `AutoHttps`, the value of
 `AutoHttpsDefaults.MeterName`:
 
 - `autohttps.certificate.expiry`, seconds until the current certificate expires, and negative once it
@@ -645,6 +692,9 @@ AutoHttps publishes two instruments through a meter named `AutoHttps`, the value
   replicas serving different certificates. Nothing is reported until the first certificate exists.
 - `autohttps.certificate.renewals`, a count of the orders this instance completed, tagged
   `outcome=success` or `outcome=failure`.
+- `autohttps.certificate.renewal_failures`, how many attempts have failed in a row, back to zero as
+  soon as one succeeds. This is the alertable one; see
+  [When renewal keeps failing](#when-renewal-keeps-failing).
 
 Subscribe to the meter with OpenTelemetry or a `MeterListener`. The instruments cost nothing until
 something is listening.
@@ -678,6 +728,9 @@ app.MapGet("/tls", (IAutoHttpsCertificateInspector inspector) =>
     return Results.Ok(new { status.HasCertificate, status.SubjectNames, status.NotAfter, status.RenewalScheduledAt });
 });
 ```
+
+The status also carries `ConsecutiveFailures`, `LastFailureAt` and `LastFailureReason`, so a status
+page can show that renewal is failing before the certificate gets close to expiring.
 
 ### Revoking a certificate
 

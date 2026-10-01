@@ -26,16 +26,30 @@ internal sealed class AutoHttpsState
         _snapshot = _snapshot with { RenewalScheduledAt = renewAt };
 
     public void OrderFailed(DateTimeOffset at, string reason) =>
-        _snapshot = _snapshot with { LastFailureAt = at, LastFailureReason = reason };
+        _snapshot = _snapshot with
+        {
+            LastFailureAt = at,
+            LastFailureReason = reason,
+            ConsecutiveFailures = _snapshot.ConsecutiveFailures + 1,
+        };
+
+    /// <summary>
+    /// Ends the current run of failures. A single failure says little; a run of them that outlasts
+    /// the renewal runway is what the health check and the overdue warning report, so the count has
+    /// to be cleared the moment a certificate is in hand again, whether this instance ordered it or
+    /// picked it up from another.
+    /// </summary>
+    public void OrderSucceeded() => _snapshot = _snapshot with { ConsecutiveFailures = 0 };
 
     internal sealed record Snapshot(
         IReadOnlyList<string> Domains,
         CertificateInfo? Certificate,
         DateTimeOffset? RenewalScheduledAt,
         DateTimeOffset? LastFailureAt,
-        string? LastFailureReason)
+        string? LastFailureReason,
+        int ConsecutiveFailures)
     {
-        public static readonly Snapshot Empty = new([], null, null, null, null);
+        public static readonly Snapshot Empty = new([], null, null, null, null, 0);
     }
 }
 

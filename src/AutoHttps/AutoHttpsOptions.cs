@@ -121,6 +121,23 @@ public sealed class AutoHttpsOptions
     public double RenewalThreshold { get; set; } = 1d / 3d;
 
     /// <summary>
+    /// The fraction of a certificate's lifetime below which it counts as near expiry, used by the
+    /// health check and by the renewal-overdue warning. Leave <see langword="null"/> to use half of
+    /// <see cref="RenewalThreshold"/>, which is one sixth at the defaults. Set it to zero to turn
+    /// both off.
+    /// </summary>
+    /// <remarks>
+    /// This is a fraction rather than a span because a threshold that suits a 90 day certificate is
+    /// wrong for a six day one. At the defaults it is 15 days of a 90 day certificate and about 27
+    /// hours of a 160 hour one. Half the renewal threshold is the default because renewal starts at
+    /// the threshold, so a certificate being renewed on time never reaches the window, and reaching
+    /// it means renewal has been failing for as long as the threshold left to spare. Setting this
+    /// at or above <see cref="RenewalThreshold"/> would warn before renewal is attempted and never
+    /// clear, so it is rejected at startup.
+    /// </remarks>
+    public double? NearExpiryWarningFraction { get; set; }
+
+    /// <summary>
     /// Whether to ask the authority when to renew, using ACME Renewal Information (RFC 9773).
     /// Defaults to <see langword="true"/>. When the authority supplies a window it overrides
     /// <see cref="RenewalThreshold"/>.

@@ -22,6 +22,9 @@ internal sealed class AutoHttpsCertificateInspector : IAutoHttpsCertificateInspe
             certificate?.NotBefore,
             certificate?.NotAfter,
             certificate?.Thumbprint,
-            snapshot.RenewalScheduledAt);
+            snapshot.RenewalScheduledAt,
+            snapshot.ConsecutiveFailures,
+            snapshot.LastFailureAt,
+            snapshot.LastFailureReason);
     }
 }

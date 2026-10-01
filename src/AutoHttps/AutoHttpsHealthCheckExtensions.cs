@@ -13,8 +13,10 @@ public static class AutoHttpsHealthCheckExtensions
 {
     /// <summary>
     /// Adds a health check for the AutoHttps certificate. It is healthy while a certificate from the
-    /// authority is being served, unhealthy once that certificate has expired, and reports
-    /// <paramref name="missingCertificateStatus"/> before the first one is obtained.
+    /// authority is being served, degraded once that certificate is near expiry, unhealthy once it has
+    /// expired, and reports <paramref name="missingCertificateStatus"/> before the first one is
+    /// obtained. When near expiry coincides with failing renewals, the result says so and carries the
+    /// failure count and the last reason.
     /// </summary>
     /// <param name="builder">The health checks builder.</param>
     /// <param name="name">The name of the health check. Defaults to <c>autohttps</c>.</param>
@@ -25,8 +27,11 @@ public static class AutoHttpsHealthCheckExtensions
     /// certificate is in place.
     /// </param>
     /// <param name="nearExpiryWarning">
-    /// Report <see cref="HealthStatus.Degraded"/> once the certificate has this long or less left.
-    /// Off by default, because a fixed threshold does not suit both 90 day and six day certificates.
+    /// Report <see cref="HealthStatus.Degraded"/> once the certificate has this long or less left, in
+    /// addition to the proportional threshold that is always applied. Off by default: a fixed span
+    /// does not suit both 90 day and six day certificates, which is what
+    /// <see cref="AutoHttpsOptions.NearExpiryWarningFraction"/> is for. When both are set, whichever
+    /// comes first wins.
     /// </param>
     /// <param name="tags">
     /// The tags on the health check. Defaults to <c>ready</c>, so it answers a readiness probe

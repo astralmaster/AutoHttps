@@ -236,4 +236,17 @@ internal static partial class Log
 
     [LoggerMessage(EventId = 146, Level = LogLevel.Debug, Message = "The diagnostics could not be run.")]
     public static partial void DiagnosticsFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        EventId = 147,
+        Level = LogLevel.Error,
+        Message = "Renewal for {Domains} is overdue. {Failures} attempts in a row have failed and the certificate " +
+                  "in use expires at {NotAfter:u}, which is inside the near-expiry window, so it will not be " +
+                  "replaced in time unless the cause is fixed. The last reason was: {Reason}")]
+    public static partial void RenewalOverdue(
+        ILogger logger,
+        string domains,
+        int failures,
+        DateTimeOffset notAfter,
+        string reason);
 }
