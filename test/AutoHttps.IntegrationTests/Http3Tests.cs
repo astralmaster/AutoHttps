@@ -51,6 +51,14 @@ public class Http3Tests
             // No MsQuic on this host. The endpoint still binds for HTTP/1.1 and HTTP/2, which the
             // tests above cover; the QUIC half runs wherever MsQuic is present, including Linux CI
             // and the container rig under test/docker.
+            //
+            // Where it is supposed to be present, returning quietly would report a green that proves
+            // nothing, so the environment says so and this turns red instead. The Redis fixture in
+            // this repository refuses to skip for the same reason.
+            Assert.False(
+                Environment.GetEnvironmentVariable("AUTOHTTPS_REQUIRE_QUIC") is "1" or "true",
+                "AUTOHTTPS_REQUIRE_QUIC is set, but MsQuic is unavailable here, so this test never " +
+                "reached QUIC. Install libmsquic rather than letting the suite report a hollow pass.");
             return;
         }
 

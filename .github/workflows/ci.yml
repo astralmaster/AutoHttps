@@ -45,7 +45,11 @@ jobs:
       - name: Unit tests
         run: dotnet test test/AutoHttps.Tests/AutoHttps.Tests.csproj -c Release --no-build
 
+      # On Linux libmsquic was just installed, so the HTTP/3 suite must reach QUIC rather than skip
+      # past it. This turns a missing MsQuic into a red job instead of a pass that proved nothing.
       - name: Integration tests
+        env:
+          AUTOHTTPS_REQUIRE_QUIC: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: dotnet test test/AutoHttps.IntegrationTests/AutoHttps.IntegrationTests.csproj -c Release --no-build
 
       # The DNS-provider suites mock their SDK or HTTP calls, so they need no services and run on both
