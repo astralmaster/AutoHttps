@@ -12,6 +12,7 @@ using AutoHttps.Certificates;
 using AutoHttps.IntegrationTests.TestCa;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -66,7 +67,8 @@ internal sealed class TestApplication : IAsyncDisposable
         bool manualChallengeMiddleware = false,
         bool tuneHandshakeTimeout = true,
         string environment = "Production",
-        Action<IAutoHttpsBuilder>? configureBuilder = null)
+        Action<IAutoHttpsBuilder>? configureBuilder = null,
+        HttpProtocols? protocols = null)
     {
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { EnvironmentName = environment });
         builder.Logging.ClearProviders();
@@ -101,19 +103,41 @@ internal sealed class TestApplication : IAsyncDisposable
 
         configureServices?.Invoke(builder.Services);
 
+        if (protocols is { } wanted && wanted.HasFlag(HttpProtocols.Http3) && IsQuicSupported())
+        {
+            // CreateSlimBuilder leaves out both of these and HTTP/3 needs both: without UseQuic the
+            // endpoint binds TCP only and logs nothing, so a test asserting on QUIC would pass by
+            // never reaching QUIC, and without UseKestrelHttpsConfiguration the bind fails because
+            // the HTTP/3 path asks that service for the endpoint's TLS settings. Registered only
+            // where MsQuic exists, so a host without it binds HTTP/1.1 and HTTP/2 as before.
+            builder.WebHost.UseQuic();
+            builder.WebHost.UseKestrelHttpsConfiguration();
+        }
+
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
             kestrel.Listen(IPAddress.Loopback, 0);
 
+            // HTTP/3 needs a port known before binding, because the UDP endpoint has to match the TCP
+            // one and Kestrel cannot resolve a dynamic port for both. Everything else binds port 0.
+            int httpsPort = protocols is { } requested && requested.HasFlag(HttpProtocols.Http3)
+                ? FindFreePort()
+                : 0;
+
             if (integration == KestrelIntegration.HttpsDefaults)
             {
-                kestrel.Listen(IPAddress.Loopback, 0, listen =>
-                    listen.UseHttps(https => https.HandshakeTimeout = HandshakeTimeout));
+                kestrel.Listen(IPAddress.Loopback, httpsPort, listen =>
+                {
+                    ApplyProtocols(listen, protocols);
+                    listen.UseHttps(https => https.HandshakeTimeout = HandshakeTimeout);
+                });
             }
             else
             {
-                kestrel.Listen(IPAddress.Loopback, 0, listen =>
+                kestrel.Listen(IPAddress.Loopback, httpsPort, listen =>
                 {
+                    ApplyProtocols(listen, protocols);
+
                     if (tuneHandshakeTimeout)
                     {
                         listen.UseAutoHttps(kestrel.ApplicationServices, tls => tls.HandshakeTimeout = HandshakeTimeout);
@@ -146,6 +170,31 @@ internal sealed class TestApplication : IAsyncDisposable
         authority.HttpChallengeResolver = _ => instance.HttpBaseAddress;
 
         return instance;
+    }
+
+    // Separated so the preview and platform suppressions cover one expression rather than the file.
+#pragma warning disable CA2252, CA1416
+    private static bool IsQuicSupported() => System.Net.Quic.QuicListener.IsSupported;
+#pragma warning restore CA2252, CA1416
+
+    private static void ApplyProtocols(ListenOptions listen, HttpProtocols? protocols)
+    {
+        if (protocols is { } value)
+        {
+            listen.Protocols = value;
+        }
+    }
+
+    /// <summary>
+    /// Takes a port from the operating system and gives it straight back, so Kestrel can bind the
+    /// same number on TCP and UDP. A race with another process is possible in principle and has not
+    /// been seen in practice; port 0 is not an option when HTTP/3 is in the mix.
+    /// </summary>
+    private static int FindFreePort()
+    {
+        using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        return ((IPEndPoint)probe.LocalEndPoint!).Port;
     }
 
     private static int ReadPort(WebApplication app, string scheme)

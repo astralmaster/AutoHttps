@@ -5,6 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="AutoHttps" Version="1.0.0" />
+    <!-- Whatever version was just packed into ../packages. Restore runs against that directory
+         alone, so a missing pack fails the build instead of quietly resolving an old release from
+         nuget.org, which is how this rig once ended up testing a version nobody built. -->
+    <PackageReference Include="AutoHttps" Version="*" />
   </ItemGroup>
 </Project>

@@ -24,6 +24,18 @@ jobs:
             8.0.x
             10.0.x
 
+      # HTTP/3 needs MsQuic, which does not ship with .NET. Without it the QUIC half of the HTTP/3
+      # suite skips itself, so installing it here is what makes that coverage real on at least one
+      # platform. The Windows runners carry Schannel's QUIC support already.
+      - name: Install libmsquic
+        if: runner.os == 'Linux'
+        run: |
+          . /etc/os-release
+          curl -fsSL "https://packages.microsoft.com/config/${ID}/${VERSION_ID}/packages-microsoft-prod.deb" -o /tmp/ms-prod.deb
+          sudo dpkg -i /tmp/ms-prod.deb
+          sudo apt-get update
+          sudo apt-get install -y libmsquic
+
       - name: Build
         run: dotnet build AutoHttps.slnx -c Release
 

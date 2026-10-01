@@ -74,6 +74,7 @@ Core shared framework, including a complete RFC 8555 client written for this lib
 | **External account binding** | Yes, required by ZeroSSL and Google Trust Services |
 | **Keys** | ECDSA P-256 (default), P-384, RSA 2048/3072/4096 |
 | **Multiple instances** | Locked, and certificates and `http-01` answers shared through the stores |
+| **Protocols** | HTTP/1.1, HTTP/2 and HTTP/3 |
 | **Observability** | Health check, metrics, and callbacks on change and failure |
 | **Stuck renewals** | Escalated once the certificate is near expiry, on thresholds proportional to its lifetime |
 | **Diagnosis** | Self-checks DNS, DNSSEC, CAA, port 80 and the challenge path when an order fails |
@@ -468,6 +469,44 @@ AutoHttps then serves the chain whose topmost certificate leads up to that root.
 offers nothing matching, the default chain is served and a warning (event 133) is logged. The default
 chain still validates for any client holding a current root, so a preference that cannot be met never
 stops a certificate being issued.
+
+## HTTP/3
+
+HTTP/3 works, with both wiring styles, and nothing in AutoHttps needs configuring for it:
+
+```csharp
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    kestrel.ListenAnyIP(80);
+    kestrel.ListenAnyIP(443, listen =>
+    {
+        listen.Protocols = HttpProtocols.Http1AndHttp2AndHttp3;
+        listen.UseAutoHttps(kestrel.ApplicationServices);
+    });
+});
+```
+
+QUIC terminates TLS in the transport rather than in the HTTPS middleware, so Kestrel builds a second
+set of TLS options for it and refuses some HTTPS settings there, `OnAuthenticate` among them.
+AutoHttps uses a certificate selector and a handshake callback, neither of which Kestrel refuses on
+that path, so the certificate it manages is served over HTTP/3 the same as over TCP. This is verified
+against a real HTTP/3 request in the container rig under `test/docker`, because Windows 10 has no
+MsQuic and the integration suite can only cover it where QUIC exists.
+
+Two things are the host's job rather than this library's, and both fail quietly enough to be worth
+stating:
+
+- **On Linux, install `libmsquic`.** It does not ship with .NET and it is not in the distribution's
+  own archive, only in Microsoft's. Without it the endpoint binds TCP only and logs nothing about
+  HTTP/3.
+- **With `WebApplication.CreateSlimBuilder`, call `UseQuic()` and `UseKestrelHttpsConfiguration()`.**
+  The slim builder leaves out both. Without the first the endpoint silently binds TCP only; without
+  the second the bind fails with a message telling you to call it. `CreateBuilder` includes both.
+
+The chain caveat from [Sending the full chain](#sending-the-full-chain) applies unchanged: the
+`UseAutoHttps(listenOptions, ...)` wiring sends the issued intermediates over HTTP/3, and the
+automatic HTTPS-defaults wiring sends the leaf alone, because Kestrel drops a configured chain
+whenever a certificate selector is in use.
 
 ## Before the first certificate arrives
 
