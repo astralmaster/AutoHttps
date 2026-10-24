@@ -11,6 +11,12 @@ dotnet add package AutoHttps.Azure
 
 Every validated domain must live in the configured zone.
 
+Azure DNS keeps every TXT value at a name in one record set, and a wildcard with its apex, or another
+client ordering for the same name, puts more than one value at `_acme-challenge`. The provider adds its
+value to whatever is there and later removes only that value, deleting the set only when nothing else
+is left in it. Each write is conditional on the set's etag, so a value another client adds in between
+is not overwritten.
+
 ```csharp
 builder.Services.AddAutoHttps(options =>
 {
