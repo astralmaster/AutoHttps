@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using AutoHttps.Diagnostics;
 using Xunit;
 
@@ -195,6 +196,34 @@ public class DnsLookupParsingTests
     [Fact]
     public void AbsentAuthenticatedDataReadsAsFalse() =>
         Assert.False(DnsLookup.Parse("""{ "Status": 0 }""", DnsRecordType.A).AuthenticatedData);
+
+    [Fact]
+    public async Task AnAnswerThatIsNotJsonReadsAsNoAnswerRatherThanThrowing()
+    {
+        // Throwing here lost the whole diagnostics report over one resolver that was misconfigured.
+        var lookup = new DnsLookup(new HtmlFactory());
+
+        DnsLookupResult? result = await lookup.QueryAsync(
+            new Uri("https://dns.example.com"), "app.example.com", DnsRecordType.A, System.Threading.CancellationToken.None);
+
+        Assert.Null(result);
+    }
+
+    private sealed class HtmlFactory : System.Net.Http.IHttpClientFactory
+    {
+        public System.Net.Http.HttpClient CreateClient(string name) => new(new HtmlHandler());
+
+        private sealed class HtmlHandler : System.Net.Http.HttpMessageHandler
+        {
+            protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(
+                System.Net.Http.HttpRequestMessage request,
+                System.Threading.CancellationToken cancellationToken) =>
+                Task.FromResult(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new System.Net.Http.StringContent("<html>not dns</html>", System.Text.Encoding.UTF8, "text/html"),
+                });
+        }
+    }
 }
 
 public class DiagnosticsReportTests

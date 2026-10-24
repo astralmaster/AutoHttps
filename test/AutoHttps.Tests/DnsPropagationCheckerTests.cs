@@ -98,6 +98,30 @@ public sealed class DnsPropagationCheckerTests
         Assert.Equal(1, handler.Calls);
     }
 
+    [Fact]
+    public async Task AnAnswerThatIsNotJsonIsTreatedAsNotVisibleYetRatherThanFailingTheOrder()
+    {
+        // https://dns.google without /resolve, or a proxy's block page, answers 200 with HTML. The wait
+        // is advisory and promises never to block issuance, so this must end in the usual timeout.
+        var handler = new StubDoh(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("<html><body>Google Public DNS</body></html>", Encoding.UTF8, "text/html"),
+        });
+        DnsPropagationChecker checker = Checker(handler, TimeSpan.FromSeconds(30), out FakeTimeProvider time);
+
+        await Complete(time, checker.WaitForRecordAsync("_acme-challenge.example.com", "the-value", CancellationToken.None));
+
+        Assert.True(handler.Calls > 1, "The checker should have kept polling until the timeout.");
+    }
+
+    [Fact]
+    public void ContainsValueSkipsAnAnswerWhoseTypeIsNotAnInteger()
+    {
+        string json = """{"Answer":[{"type":16.5,"data":"\"the-value\""},{"type":16,"data":"\"other\""}]}""";
+
+        Assert.False(DnsPropagationChecker.ContainsValue(json, "the-value"));
+    }
+
     private static DnsPropagationChecker Checker(StubDoh handler, TimeSpan timeout, out FakeTimeProvider time)
     {
         time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero));

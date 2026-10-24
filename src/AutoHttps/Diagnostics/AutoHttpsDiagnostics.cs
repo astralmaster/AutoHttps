@@ -380,7 +380,7 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
         DnsLookupResult? a = await _dns.QueryAsync(resolver, name, DnsRecordType.A, cancellationToken);
         if (a is not { } address)
         {
-            return new AutoHttpsCheck(check, AutoHttpsCheckOutcome.Warning, $"'{resolver}' could not be reached");
+            return new AutoHttpsCheck(check, AutoHttpsCheckOutcome.Warning, $"'{resolver}' could not be reached or did not answer in the DNS JSON format");
         }
 
         if (address.Status == DnsLookup.ServerFailure)
@@ -483,7 +483,7 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
             DnsLookupResult? result = await _dns.QueryAsync(resolver, candidate, DnsRecordType.Caa, cancellationToken);
             if (result is not { } records)
             {
-                return new AutoHttpsCheck(check, AutoHttpsCheckOutcome.Warning, $"'{resolver}' could not be reached");
+                return new AutoHttpsCheck(check, AutoHttpsCheckOutcome.Warning, $"'{resolver}' could not be reached or did not answer in the DNS JSON format");
             }
 
             if (records.Records.Count == 0)

@@ -95,9 +95,11 @@ internal sealed class DnsPropagationChecker
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
             return ContainsValue(body, expectedValue);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException or JsonException)
         {
             // One failed lookup is not a failure of the order; another poll follows unless time runs out.
+            // An answer that is not JSON counts the same: a resolver URL missing its path, such as
+            // https://dns.google without /resolve, or a proxy's block page both answer 200 with HTML.
             Log.DnsQueryFailed(_logger, recordName, ex);
             return false;
         }
@@ -126,7 +128,7 @@ internal sealed class DnsPropagationChecker
         {
             if (answer.TryGetProperty("type", out JsonElement type) &&
                 type.ValueKind == JsonValueKind.Number &&
-                type.GetInt32() != TxtRecordType)
+                (!type.TryGetInt32(out int number) || number != TxtRecordType))
             {
                 continue;
             }

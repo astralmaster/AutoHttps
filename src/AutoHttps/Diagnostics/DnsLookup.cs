@@ -37,8 +37,9 @@ internal sealed class DnsLookup
     public DnsLookup(IHttpClientFactory httpClientFactory) => _httpClientFactory = httpClientFactory;
 
     /// <summary>
-    /// Asks the resolver about a name. Returns null when the resolver itself could not be reached, which
-    /// is a different thing from the resolver answering that the name is broken.
+    /// Asks the resolver about a name. Returns null when the resolver itself could not be reached or did
+    /// not answer in the DNS JSON format, which is a different thing from the resolver answering that
+    /// the name is broken.
     /// </summary>
     public async Task<DnsLookupResult?> QueryAsync(
         Uri resolver,
@@ -60,8 +61,10 @@ internal sealed class DnsLookup
 
             return Parse(await response.Content.ReadAsStringAsync(cancellationToken), type);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException or JsonException)
         {
+            // An answer that is not JSON is as unusable as no answer, and has to be reported as one
+            // check that could not run rather than lose the whole report to an exception.
             return null;
         }
     }
@@ -81,8 +84,9 @@ internal sealed class DnsLookup
         using JsonDocument document = JsonDocument.Parse(json);
 
         int status = document.RootElement.TryGetProperty("Status", out JsonElement statusElement) &&
-            statusElement.ValueKind == JsonValueKind.Number
-            ? statusElement.GetInt32()
+            statusElement.ValueKind == JsonValueKind.Number &&
+            statusElement.TryGetInt32(out int code)
+            ? code
             : -1;
 
         bool authenticated = document.RootElement.TryGetProperty("AD", out JsonElement adElement) &&
@@ -98,7 +102,7 @@ internal sealed class DnsLookup
                 // address it resolves to, so the answers are filtered to the type that was asked for.
                 if (answer.TryGetProperty("type", out JsonElement recordType) &&
                     recordType.ValueKind == JsonValueKind.Number &&
-                    recordType.GetInt32() != type.Number)
+                    (!recordType.TryGetInt32(out int number) || number != type.Number))
                 {
                     continue;
                 }
