@@ -20,6 +20,8 @@ internal sealed class CertificateAcquirer
     private readonly IReadOnlyList<IChallengeHandler> _handlers;
     private readonly ILogger<CertificateAcquirer> _logger;
 
+    private string? _lastExplanation;
+
     public CertificateAcquirer(
         AcmeSession session,
         IOptions<AutoHttpsOptions> options,
@@ -205,6 +207,16 @@ internal sealed class CertificateAcquirer
         {
             Log.RenewalWindowReceived(_logger, suggested.Start, suggested.End);
             window = new Renewal.RenewalWindow(suggested.Start, suggested.End);
+
+            // RFC 9773 section 4.2: clients SHOULD show the operator this URL. An authority sends one when
+            // it moved the window for a reason, typically a mass revocation, which is exactly when an
+            // operator looking at an early renewal needs to know why. Logged once per URL, because the
+            // window is read again on every check.
+            if (info.Resource.ExplanationUrl is { } explanation &&
+                !string.Equals(Interlocked.Exchange(ref _lastExplanation, explanation.AbsoluteUri), explanation.AbsoluteUri, StringComparison.Ordinal))
+            {
+                Log.RenewalWindowExplained(_logger, suggested.Start, suggested.End, explanation);
+            }
         }
 
         return new RenewalWindowResult(window, info.RetryAfter);

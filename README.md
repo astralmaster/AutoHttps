@@ -602,6 +602,7 @@ exists for diagnosis, not alerting.
 | 148 | Information | The authority would not accept the order as a renewal, usually because the certificate belongs to the account used before the email address or account key changed. It was ordered again without the renewal hint. |
 | 151 | Information | `KeyAlgorithm` changed, so the certificate in use is being replaced. It is served until the new one arrives. |
 | 154 | Information | Certificates are kept in a store other instances can share, but the lock is still a local file. Fine for one instance, while several need `UseDistributedLock`. Logged once at startup. |
+| 155 | Information | The authority explained the renewal window it set, typically because it moved renewal forward for a revocation. The message carries the URL. Logged once per URL. |
 | 110 | Warning | An order failed and will be retried. The reason is in the message; the stack trace is logged separately at Debug as event 124. |
 | 112 | Warning | A self-signed fallback is being served, logged once rather than per handshake. |
 | 114 | Warning | The store could not be read; continuing without a cached certificate. |

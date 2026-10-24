@@ -294,4 +294,10 @@ internal static partial class Log
                   "them ordering at the same time is a file under {Directory} that only this machine sees. If more " +
                   "than one instance uses the store, register a shared lock with UseDistributedLock.")]
     public static partial void LockNotShared(ILogger logger, string store, string directory);
+
+    [LoggerMessage(
+        EventId = 155,
+        Level = LogLevel.Information,
+        Message = "The certificate authority set the renewal window to {Start:u} to {End:u} and explains why at {ExplanationUrl}.")]
+    public static partial void RenewalWindowExplained(ILogger logger, DateTimeOffset start, DateTimeOffset end, Uri explanationUrl);
 }

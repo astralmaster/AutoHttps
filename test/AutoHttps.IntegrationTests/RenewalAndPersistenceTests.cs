@@ -181,6 +181,34 @@ public class RenewalAndPersistenceTests
     }
 
     [Fact]
+    public async Task TheAuthoritysExplanationOfItsRenewalWindowIsShownOnce()
+    {
+        // RFC 9773 asks clients to show the operator the explanation URL. An authority sends one when it
+        // moved renewal forward for a reason, and the window is read on every check, so it is logged when
+        // first seen rather than every few seconds.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            Configure(storage)(options);
+            options.RenewalCheckInterval = TimeSpan.FromMilliseconds(300);
+        });
+
+        await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(20);
+        while (app.Log.CountOf(119) < 3 && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(100);
+        }
+
+        Assert.True(app.Log.CountOf(119) >= 3, "The window should have been read several times." + Environment.NewLine + app.Log.Describe());
+        Assert.Equal(1, app.Log.CountOf(155));
+        Assert.Contains(app.Log.Entries, entry => entry.Contains("[155]", StringComparison.Ordinal) && entry.Contains("/explain", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RenewsWhenTheAuthoritySaysTheWindowHasOpened()
     {
         using var storage = new TempStorage();
