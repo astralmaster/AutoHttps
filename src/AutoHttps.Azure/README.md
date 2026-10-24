@@ -52,8 +52,10 @@ the new value over it, which needs the Recover permission on secrets (Key Vault 
 ## Credentials
 
 Both parts use `DefaultAzureCredential` by default, which resolves a managed identity, environment
-variables, or the Azure CLI. Set `TenantId`, `ClientId` and `ClientSecret` on the options to use a
-service principal instead. The identity needs DNS Zone Contributor on the zone, and Key Vault Secrets
+variables, or the Azure CLI. Set `ClientId` alone to pick a user-assigned managed identity, which a host
+with several of them needs. Set `TenantId`, `ClientId` and `ClientSecret` together to use a service
+principal instead. Setting only some of them is refused at startup rather than quietly signing in as
+someone else. The identity needs DNS Zone Contributor on the zone, and Key Vault Secrets
 Officer on the vault.
 
 ## Options

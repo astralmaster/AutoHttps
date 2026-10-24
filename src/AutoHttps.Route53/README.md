@@ -42,7 +42,7 @@ config, or an instance role. Set them explicitly if you need to:
 | Option | Default | What it does |
 |---|---|---|
 | `HostedZoneId` | *(discovered)* | The zone to publish in. Leave unset to find it from the record name. |
-| `AccessKeyId` / `SecretAccessKey` | *(default chain)* | Explicit credentials. |
+| `AccessKeyId` / `SecretAccessKey` | *(default chain)* | Explicit credentials. Set both or neither, because one without the other is refused at startup. |
 | `Region` | *(SDK default)* | The region to sign for, for example `us-east-1`. |
 | `RecordTtlSeconds` | 60 | TTL for the challenge records. A record set that already exists keeps its own. |
 

@@ -44,7 +44,7 @@ public static class AutoHttpsRoute53BuilderExtensions
         return builder;
     }
 
-    private static AmazonRoute53Client CreateClient(Route53DnsOptions options)
+    internal static AmazonRoute53Client CreateClient(Route53DnsOptions options)
     {
         var config = new AmazonRoute53Config();
         if (!string.IsNullOrWhiteSpace(options.Region))
@@ -52,9 +52,22 @@ public static class AutoHttpsRoute53BuilderExtensions
             config.RegionEndpoint = RegionEndpoint.GetBySystemName(options.Region);
         }
 
-        if (!string.IsNullOrWhiteSpace(options.AccessKeyId) && !string.IsNullOrWhiteSpace(options.SecretAccessKey))
+        bool hasKeyId = !string.IsNullOrWhiteSpace(options.AccessKeyId);
+        bool hasSecret = !string.IsNullOrWhiteSpace(options.SecretAccessKey);
+
+        if (hasKeyId && hasSecret)
         {
             return new AmazonRoute53Client(new BasicAWSCredentials(options.AccessKeyId, options.SecretAccessKey), config);
+        }
+
+        // One without the other is a configuration mistake, such as a misspelt key for the secret.
+        // Falling back to the default chain would sign in as whatever that finds, an instance role for
+        // example, with other permissions, and fail far from the cause.
+        if (hasKeyId || hasSecret)
+        {
+            throw new InvalidOperationException(
+                "Route53DnsOptions sets only one of AccessKeyId and SecretAccessKey. Set both to use explicit " +
+                "credentials, or neither to use the AWS SDK's default credential chain.");
         }
 
         return new AmazonRoute53Client(config);

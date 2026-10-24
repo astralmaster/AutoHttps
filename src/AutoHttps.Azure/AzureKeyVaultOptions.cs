@@ -20,7 +20,7 @@ public sealed class AzureKeyVaultOptions
     /// <summary>The tenant id, for an explicit client-secret credential.</summary>
     public string? TenantId { get; set; }
 
-    /// <summary>The client (application) id, for an explicit client-secret credential.</summary>
+    /// <summary>The client (application) id, for an explicit client-secret credential. Set on its own, the client id of the user-assigned managed identity to use.</summary>
     public string? ClientId { get; set; }
 
     /// <summary>The client secret, for an explicit client-secret credential.</summary>

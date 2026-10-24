@@ -183,6 +183,30 @@ public sealed class Route53DnsChallengeProviderTests
         Assert.Null(route53.Current("zone1", Name));
     }
 
+    [Theory]
+    [InlineData("AKIDEXAMPLE", null)]
+    [InlineData(null, "secret")]
+    public void OnlyHalfOfAnExplicitCredentialIsRefused(string? accessKeyId, string? secretAccessKey)
+    {
+        // Falling back to the default chain here signs in as whatever it finds, an instance role for
+        // example, and the failure shows up later as a permission error on that other identity.
+        var options = new Route53DnsOptions { AccessKeyId = accessKeyId, SecretAccessKey = secretAccessKey, Region = "us-east-1" };
+
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(
+            () => AutoHttpsRoute53BuilderExtensions.CreateClient(options));
+
+        Assert.Contains("AccessKeyId", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnExplicitCredentialWithBothHalvesIsAccepted()
+    {
+        using Amazon.Route53.AmazonRoute53Client client = AutoHttpsRoute53BuilderExtensions.CreateClient(
+            new Route53DnsOptions { AccessKeyId = "AKIDEXAMPLE", SecretAccessKey = "secret", Region = "us-east-1" });
+
+        Assert.NotNull(client);
+    }
+
     [Fact]
     public async Task CreateReturnsOnlyOnceTheChangeIsOnEveryNameServer()
     {
