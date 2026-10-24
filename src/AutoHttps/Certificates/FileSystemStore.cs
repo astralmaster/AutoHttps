@@ -11,6 +11,7 @@ internal sealed class FileSystemStore : ICertificateStore, IAccountKeyStore
     private const string CertificateExtension = ".crt.pem";
     private const string PrivateKeyExtension = ".key.pem";
     private const string AccountKeyExtension = ".account.pem";
+    private const int MoveAttempts = 5;
 
     private readonly string _root;
 
@@ -67,16 +68,80 @@ internal sealed class FileSystemStore : ICertificateStore, IAccountKeyStore
             throw;
         }
 
+        // Kept so the pair can be put back together if the second move fails after the first succeeded:
+        // a new key next to the old certificate matches neither, and the next start would discard both
+        // and order again.
+        string? previousKey = File.Exists(keyPath) ? await File.ReadAllTextAsync(keyPath, cancellationToken) : null;
+
         try
         {
-            File.Move(keyStaged, keyPath, overwrite: true);
-            File.Move(certificateStaged, certificatePath, overwrite: true);
+            await MoveAsync(keyStaged, keyPath);
         }
         catch
         {
             TryDelete(keyStaged);
             TryDelete(certificateStaged);
             throw;
+        }
+
+        try
+        {
+            await MoveAsync(certificateStaged, certificatePath);
+        }
+        catch
+        {
+            TryDelete(certificateStaged);
+            await RestoreAsync(keyPath, previousKey);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Publishes a staged file. On Windows a file cannot be replaced while any other handle has it
+    /// open, whatever sharing that handle allows: a sibling instance reading the pair, an antivirus
+    /// scanner or a backup agent. Each holds it only for a moment, so the failure is retried briefly
+    /// before it counts.
+    /// </summary>
+    private static async Task MoveAsync(string staged, string destination)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.Move(staged, destination, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (attempt < MoveAttempts - 1 && ex is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50 << attempt));
+            }
+        }
+    }
+
+    private static async Task RestoreAsync(string keyPath, string? previousKey)
+    {
+        try
+        {
+            if (previousKey is null)
+            {
+                TryDelete(keyPath);
+                return;
+            }
+
+            string staged = await StageAsync(keyPath, previousKey, CancellationToken.None);
+            try
+            {
+                await MoveAsync(staged, keyPath);
+            }
+            catch
+            {
+                TryDelete(staged);
+                throw;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The original failure is the one worth reporting. This only tried to soften it.
         }
     }
 
@@ -96,7 +161,7 @@ internal sealed class FileSystemStore : ICertificateStore, IAccountKeyStore
     {
         EnsureRoot();
         string path = Path.Combine(_root, name + AccountKeyExtension);
-        File.Move(await StageAsync(path, privateKeyPem, cancellationToken), path, overwrite: true);
+        await MoveAsync(await StageAsync(path, privateKeyPem, cancellationToken), path);
     }
 
     private void EnsureRoot() => CreatePrivateDirectory(_root);

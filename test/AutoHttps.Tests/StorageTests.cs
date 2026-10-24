@@ -194,6 +194,46 @@ public class FileSystemStoreTests : IDisposable
         Assert.Null(await store.LoadAsync("site", CancellationToken.None));
     }
 
+    [Fact]
+    public async Task AHandleReleasedMomentsLaterOnlyDelaysThePublish()
+    {
+        // On Windows a file cannot be replaced while another handle has it open: a sibling instance
+        // reading the pair, an antivirus scanner, a backup agent. Waiting a moment is better than failing
+        // between the two moves and leaving a new key next to the old certificate.
+        var store = new FileSystemStore(_root);
+        await store.SaveAsync("site", new CertificateMaterial("chain-1", "key-1"), CancellationToken.None);
+
+        var scanner = new FileStream(Path.Combine(_root, "site.crt.pem"), FileMode.Open, FileAccess.Read, FileShare.Read);
+        Task release = Task.Delay(TimeSpan.FromMilliseconds(150)).ContinueWith(_ => scanner.Dispose(), TaskScheduler.Default);
+
+        await store.SaveAsync("site", new CertificateMaterial("chain-2", "key-2"), CancellationToken.None);
+        await release;
+
+        Assert.Equal("chain-2", (await store.LoadAsync("site", CancellationToken.None))!.CertificateChainPem);
+    }
+
+    [Fact]
+    public async Task APublishThatFailsHalfwayPutsThePreviousKeyBack()
+    {
+        // When the certificate cannot be published at all, the key that was already moved into place
+        // would sit next to a certificate it does not match, and the next start would discard both.
+        var store = new FileSystemStore(_root);
+        await store.SaveAsync("site", new CertificateMaterial("chain-1", "key-1"), CancellationToken.None);
+
+        // A directory where the certificate goes makes its move fail on every platform, for good.
+        string certificate = Path.Combine(_root, "site.crt.pem");
+        File.Delete(certificate);
+        Directory.CreateDirectory(certificate);
+
+        // Windows reports it as access denied and Unix as an I/O error.
+        Exception failure = await Assert.ThrowsAnyAsync<Exception>(
+            () => store.SaveAsync("site", new CertificateMaterial("chain-2", "key-2"), CancellationToken.None));
+        Assert.True(failure is IOException or UnauthorizedAccessException, failure.ToString());
+
+        Assert.Equal("key-1", await File.ReadAllTextAsync(Path.Combine(_root, "site.key.pem")));
+        Assert.Empty(Directory.GetFiles(_root, "*.tmp"));
+    }
+
     private const UnixFileMode OwnerOnlyFile = UnixFileMode.UserRead | UnixFileMode.UserWrite;
     private const UnixFileMode OwnerOnlyDirectory = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 
