@@ -241,7 +241,15 @@ internal sealed class AutoHttpsService : BackgroundService
         if (handle is null)
         {
             Log.LockUnavailable(_logger, description);
-            await AdoptFromStoreAsync(storeName, announce: true, cancellationToken);
+
+            // Another instance holds the lock. A certificate it has already published ends this
+            // instance's run of failures just as ordering one here would have, so it is counted the
+            // same way: the failure count, the overdue flag and the backoff all start again.
+            if (await AdoptFromStoreAsync(storeName, announce: true, cancellationToken) is not null && !IsDue(_current))
+            {
+                return AcquisitionOutcome.Acquired;
+            }
+
             return AcquisitionOutcome.Deferred;
         }
 

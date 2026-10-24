@@ -120,6 +120,80 @@ public class ResilienceTests
         Assert.Equal(0, app.Log.CountOf(154));
     }
 
+    [Fact]
+    public async Task ACertificateAnotherInstancePublishedEndsThisInstancesRunOfFailures()
+    {
+        // This instance failed several times, then another one took over and succeeded while still
+        // holding the lock. Picking up its certificate is as good as ordering one, so the failure count
+        // has to clear. Left set, it would keep the failure gauge raised for the certificate's lifetime
+        // and suppress the overdue escalation next time.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        var gate = new SwitchableLock();
+
+        await using TestApplication waiting = await TestApplication.StartAsync(
+            authority,
+            options =>
+            {
+                options.DomainNames.Add("app.example.com");
+                options.StorageDirectory = storage.Path;
+            },
+            configureServices: services => services.Replace(ServiceDescriptor.Singleton<IDistributedLock>(gate)));
+
+        IAutoHttpsCertificateInspector inspector = waiting.Services.GetRequiredService<IAutoHttpsCertificateInspector>();
+        await WaitUntilAsync(() => inspector.GetStatus().ConsecutiveFailures >= 2, waiting);
+
+        string published;
+        await using (TestApplication other = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+        }))
+        {
+            published = (await other.WaitForCertificateAsync("app.example.com", IssuanceTimeout)).Leaf.Thumbprint;
+        }
+
+        // From now on the lock is busy, as it is while the other instance holds it.
+        gate.Busy = true;
+
+        ServerCertificate adopted = await waiting.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+
+        Assert.Equal(published, adopted.Leaf.Thumbprint);
+        await WaitUntilAsync(() => inspector.GetStatus().ConsecutiveFailures == 0, waiting);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, TestApplication app)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + IssuanceTimeout;
+
+        while (!condition())
+        {
+            if (DateTimeOffset.UtcNow > deadline)
+            {
+                throw new TimeoutException("The condition was not met." + Environment.NewLine + app.Log.Describe());
+            }
+
+            await Task.Delay(50);
+        }
+    }
+
+    /// <summary>Fails until <see cref="Busy"/> is set, then reports the lock as held by someone else.</summary>
+    private sealed class SwitchableLock : IDistributedLock
+    {
+        private volatile bool _busy;
+
+        public bool Busy
+        {
+            get => _busy;
+            set => _busy = value;
+        }
+
+        public Task<IAsyncDisposable?> TryAcquireAsync(string name, CancellationToken cancellationToken) =>
+            _busy
+                ? Task.FromResult<IAsyncDisposable?>(null)
+                : throw new UnauthorizedAccessException("The lock directory is not writable.");
+    }
+
     private sealed class MemoryStore : ICertificateStore
     {
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CertificateMaterial> _stored = new();
