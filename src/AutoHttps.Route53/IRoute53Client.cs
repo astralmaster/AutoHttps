@@ -16,14 +16,20 @@ internal interface IRoute53Client
     /// <summary>The current TXT record at <paramref name="recordName"/>, or null if there is none.</summary>
     Task<Route53TxtRecord?> GetTxtRecordAsync(string zoneId, string recordName, CancellationToken cancellationToken);
 
-    /// <summary>Applies a change (<c>UPSERT</c> or <c>DELETE</c>) to the TXT record at <paramref name="recordName"/>.</summary>
-    Task ChangeTxtAsync(
+    /// <summary>
+    /// Applies a change (<c>UPSERT</c> or <c>DELETE</c>) to the TXT record at <paramref name="recordName"/>
+    /// and returns the id Route 53 gave the change.
+    /// </summary>
+    Task<string> ChangeTxtAsync(
         string zoneId,
         string recordName,
         string action,
         long ttl,
         IReadOnlyList<string> values,
         CancellationToken cancellationToken);
+
+    /// <summary>Whether Route 53 has applied the change to every name server for the zone (INSYNC).</summary>
+    Task<bool> IsChangeInSyncAsync(string changeId, CancellationToken cancellationToken);
 }
 
 /// <summary>A TXT record's values, as Route 53 stores them (each already quoted), and its TTL.</summary>

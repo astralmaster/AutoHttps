@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutoHttps.Route53;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace AutoHttps.Route53.Tests;
@@ -145,11 +146,72 @@ public sealed class Route53DnsChallengeProviderTests
         Assert.Null(route53.Current("zone1", Name));
     }
 
-    private static Route53DnsChallengeProvider Provider(FakeRoute53 route53, Action<Route53DnsOptions> configure)
+    [Fact]
+    public async Task CreateReturnsOnlyOnceTheChangeIsOnEveryNameServer()
+    {
+        // Route 53 accepts a change before every name server has it. Asking the authority to validate
+        // in that window can reach a name server that is behind and fail the validation.
+        var route53 = new FakeRoute53 { PendingChecks = 3 };
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        Route53DnsChallengeProvider provider = Provider(route53, o => o.HostedZoneId = "zone1", time);
+
+        Task create = provider.CreateTxtRecordAsync(Name, "the-value", CancellationToken.None);
+        await DriveAsync(create, time);
+
+        Assert.Equal(["/change/C1", "/change/C1", "/change/C1", "/change/C1"], route53.StatusChecks.ToArray());
+    }
+
+    [Fact]
+    public async Task CreateFailsRatherThanAskingForValidationWhenTheChangeNeverApplies()
+    {
+        var route53 = new FakeRoute53 { PendingChecks = int.MaxValue };
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        Route53DnsChallengeProvider provider = Provider(route53, o => o.HostedZoneId = "zone1", time);
+
+        Task create = provider.CreateTxtRecordAsync(Name, "the-value", CancellationToken.None);
+
+        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => DriveAsync(create, time));
+        Assert.Contains("/change/C1", error.Message, StringComparison.Ordinal);
+
+        // It polled for the whole two minutes and then stopped, rather than giving up early or never.
+        int expected = (int)(Route53DnsChallengeProvider.SyncTimeout / Route53DnsChallengeProvider.SyncPollInterval) + 1;
+        Assert.Equal(expected, route53.StatusChecks.Count);
+    }
+
+    [Fact]
+    public async Task DeleteDoesNotWaitForTheChangeToApply()
+    {
+        // Nothing validates against a removed value, so cleanup has no reason to hold the order up.
+        var route53 = new FakeRoute53 { PendingChecks = int.MaxValue };
+        route53.Seed("zone1", Name, 60, "\"the-value\"");
+        Route53DnsChallengeProvider provider = Provider(route53, o => o.HostedZoneId = "zone1");
+
+        await provider.DeleteTxtRecordAsync(Name, "the-value", CancellationToken.None);
+
+        Assert.Empty(route53.StatusChecks);
+    }
+
+    // Advances the fake clock one poll interval at a time until the operation finishes, giving its
+    // continuation a moment to register the next delay in between.
+    private static async Task DriveAsync(Task operation, FakeTimeProvider time)
+    {
+        for (int step = 0; step < 200 && !operation.IsCompleted; step++)
+        {
+            await Task.Delay(10);
+            time.Advance(Route53DnsChallengeProvider.SyncPollInterval);
+        }
+
+        await operation;
+    }
+
+    private static Route53DnsChallengeProvider Provider(
+        FakeRoute53 route53,
+        Action<Route53DnsOptions> configure,
+        TimeProvider? time = null)
     {
         var options = new Route53DnsOptions();
         configure(options);
-        return new Route53DnsChallengeProvider(route53, Options.Create(options));
+        return new Route53DnsChallengeProvider(route53, Options.Create(options), time);
     }
 
     /// <summary>
@@ -181,7 +243,12 @@ public sealed class Route53DnsChallengeProviderTests
         public Task<Route53TxtRecord?> GetTxtRecordAsync(string zoneId, string recordName, CancellationToken cancellationToken) =>
             Task.FromResult(Current(zoneId, recordName));
 
-        public Task ChangeTxtAsync(
+        /// <summary>How many status checks report a change as still pending before it is in sync.</summary>
+        public int PendingChecks { get; set; }
+
+        public List<string> StatusChecks { get; } = [];
+
+        public Task<string> ChangeTxtAsync(
             string zoneId,
             string recordName,
             string action,
@@ -190,11 +257,12 @@ public sealed class Route53DnsChallengeProviderTests
             CancellationToken cancellationToken)
         {
             Changes.Add(new RecordedChange(zoneId, recordName, action, ttl, values.ToList()));
+            string id = "/change/C" + Changes.Count;
 
             if (action == "UPSERT")
             {
                 _records[(zoneId, recordName)] = new Route53TxtRecord(ttl, values.ToArray());
-                return Task.CompletedTask;
+                return Task.FromResult(id);
             }
 
             Route53TxtRecord? current = Current(zoneId, recordName);
@@ -204,7 +272,20 @@ public sealed class Route53DnsChallengeProviderTests
             }
 
             _records.Remove((zoneId, recordName));
-            return Task.CompletedTask;
+            return Task.FromResult(id);
+        }
+
+        public Task<bool> IsChangeInSyncAsync(string changeId, CancellationToken cancellationToken)
+        {
+            StatusChecks.Add(changeId);
+
+            if (PendingChecks > 0)
+            {
+                PendingChecks--;
+                return Task.FromResult(false);
+            }
+
+            return Task.FromResult(true);
         }
 
         internal sealed record RecordedChange(string ZoneId, string Name, string Action, long Ttl, IReadOnlyList<string> Values);

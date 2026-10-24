@@ -64,7 +64,7 @@ internal sealed class Route53ClientAdapter : IRoute53Client, IDisposable
         return null;
     }
 
-    public Task ChangeTxtAsync(
+    public async Task<string> ChangeTxtAsync(
         string zoneId,
         string recordName,
         string action,
@@ -96,7 +96,17 @@ internal sealed class Route53ClientAdapter : IRoute53Client, IDisposable
             },
         };
 
-        return _route53.ChangeResourceRecordSetsAsync(request, cancellationToken);
+        ChangeResourceRecordSetsResponse response = await _route53.ChangeResourceRecordSetsAsync(request, cancellationToken);
+        return response.ChangeInfo?.Id ?? string.Empty;
+    }
+
+    public async Task<bool> IsChangeInSyncAsync(string changeId, CancellationToken cancellationToken)
+    {
+        // The id comes back as "/change/C..." and the request takes the bare id.
+        string id = changeId.StartsWith("/change/", StringComparison.Ordinal) ? changeId["/change/".Length..] : changeId;
+
+        GetChangeResponse response = await _route53.GetChangeAsync(new GetChangeRequest { Id = id }, cancellationToken);
+        return response.ChangeInfo?.Status == ChangeStatus.INSYNC;
     }
 
     public void Dispose() => _route53.Dispose();

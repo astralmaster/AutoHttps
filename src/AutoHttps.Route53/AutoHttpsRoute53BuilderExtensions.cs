@@ -38,7 +38,8 @@ public static class AutoHttpsRoute53BuilderExtensions
         builder.Services.Replace(ServiceDescriptor.Singleton<IDnsChallengeProvider>(provider =>
             new Route53DnsChallengeProvider(
                 provider.GetRequiredService<IRoute53Client>(),
-                provider.GetRequiredService<IOptions<Route53DnsOptions>>())));
+                provider.GetRequiredService<IOptions<Route53DnsOptions>>(),
+                provider.GetService<TimeProvider>())));
 
         return builder;
     }

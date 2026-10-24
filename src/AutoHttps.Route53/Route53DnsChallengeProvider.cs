@@ -15,17 +15,24 @@ public sealed class Route53DnsChallengeProvider : IDnsChallengeProvider
 {
     private const string ChallengePrefix = "_acme-challenge.";
 
+    // AWS says a change generally reaches every name server for the zone within 60 seconds. Both
+    // values follow what certbot and lego settled on for the same wait.
+    internal static readonly TimeSpan SyncPollInterval = TimeSpan.FromSeconds(4);
+    internal static readonly TimeSpan SyncTimeout = TimeSpan.FromMinutes(2);
+
     private readonly IRoute53Client _client;
     private readonly Route53DnsOptions _options;
+    private readonly TimeProvider _time;
     private readonly ConcurrentDictionary<string, string> _zoneIds = new(StringComparer.OrdinalIgnoreCase);
 
-    internal Route53DnsChallengeProvider(IRoute53Client client, IOptions<Route53DnsOptions> options)
+    internal Route53DnsChallengeProvider(IRoute53Client client, IOptions<Route53DnsOptions> options, TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(options);
 
         _client = client;
         _options = options.Value;
+        _time = time ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -50,7 +57,36 @@ public sealed class Route53DnsChallengeProvider : IDnsChallengeProvider
         IReadOnlyList<string> values = existing is null ? [value] : [.. existing.Values, value];
         long ttl = existing?.Ttl ?? _options.RecordTtlSeconds;
 
-        await _client.ChangeTxtAsync(zoneId, recordName, "UPSERT", ttl, values, cancellationToken);
+        string changeId = await _client.ChangeTxtAsync(zoneId, recordName, "UPSERT", ttl, values, cancellationToken);
+        await WaitUntilInSyncAsync(changeId, recordName, cancellationToken);
+    }
+
+    /// <summary>
+    /// Waits until Route 53 reports the change on every name server for the zone. A change it has
+    /// accepted is not yet visible everywhere, and an authority that asks a name server still behind
+    /// fails the validation and counts it against the account. Giving up here costs an order attempt
+    /// rather than one of the authority's failed-validation allowances.
+    /// </summary>
+    private async Task WaitUntilInSyncAsync(string changeId, string recordName, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(changeId))
+        {
+            return;
+        }
+
+        DateTimeOffset deadline = _time.GetUtcNow() + SyncTimeout;
+
+        while (!await _client.IsChangeInSyncAsync(changeId, cancellationToken))
+        {
+            if (_time.GetUtcNow() >= deadline)
+            {
+                throw new InvalidOperationException(
+                    $"Route 53 accepted the TXT record for '{recordName}' (change {changeId}) but had not applied it to " +
+                    "every name server after two minutes, so validation was not requested.");
+            }
+
+            await Task.Delay(SyncPollInterval, _time, cancellationToken);
+        }
     }
 
     /// <inheritdoc />

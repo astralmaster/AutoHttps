@@ -51,5 +51,10 @@ client ordering for the same name, puts more than one value at `_acme-challenge`
 value to whatever is there and later removes only that value, deleting the set only when nothing else
 is left in it.
 
+After publishing a value the provider waits, for up to two minutes, until Route 53 reports the change on
+every name server for the zone (`INSYNC`). AWS says that generally takes under a minute, and asking for
+validation before then can fail it.
+
 A minimum policy grants `route53:ChangeResourceRecordSets` and `route53:ListResourceRecordSets` on the
-hosted zone, plus `route53:ListHostedZonesByName` when the zone is discovered.
+hosted zone, `route53:GetChange` to wait for a change to apply, plus `route53:ListHostedZonesByName`
+when the zone is discovered.
