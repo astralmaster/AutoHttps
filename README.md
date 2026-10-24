@@ -350,8 +350,9 @@ answers the authority would have got. See [Diagnosing a failure](#diagnosing-a-f
 
 Instances that share a storage directory coordinate automatically: one takes a lock and orders the
 certificate, the rest pick it up from the store and never order their own. That part works, and it
-survives the lock holder being killed mid-order. When instances do not share a filesystem, supply
-your own lock:
+survives the lock holder being killed mid-order. `UseRedis` (below) brings a lock of its own for
+instances that share Redis instead. Otherwise, when instances do not share a filesystem, supply your
+own lock:
 
 ```csharp
 builder.Services
@@ -363,7 +364,8 @@ builder.Services
 
 The instance that wins the lock is not necessarily the one the certificate authority's validation
 request reaches, so the answer to a challenge has to be readable by every replica rather than only by
-the one that ordered. `UseRedis` arranges that, along with the certificate and the account key:
+the one that ordered. `UseRedis` arranges that, along with the certificate, the account key and the
+lock:
 
 ```csharp
 builder.Services
@@ -592,6 +594,7 @@ exists for diagnosis, not alerting.
 | 145 | Information | The diagnostics ran after a failed order and found nothing wrong. See "Diagnosing a failure". |
 | 148 | Information | The authority would not accept the order as a renewal, usually because the certificate belongs to the account used before the email address or account key changed. It was ordered again without the renewal hint. |
 | 151 | Information | `KeyAlgorithm` changed, so the certificate in use is being replaced. It is served until the new one arrives. |
+| 154 | Information | Certificates are kept in a store other instances can share, but the lock is still a local file. Fine for one instance, while several need `UseDistributedLock`. Logged once at startup. |
 | 110 | Warning | An order failed and will be retried. The reason is in the message; the stack trace is logged separately at Debug as event 124. |
 | 112 | Warning | A self-signed fallback is being served, logged once rather than per handshake. |
 | 114 | Warning | The store could not be read; continuing without a cached certificate. |

@@ -24,6 +24,21 @@ public sealed class RedisRegistrationTests
     }
 
     [Fact]
+    public void UseRedisCoordinatesInstancesThroughTheSameRedis()
+    {
+        // Sharing the certificate without sharing the lock is what made every replica order at once.
+        Assert.Equal(typeof(RedisDistributedLock), Registered<IDistributedLock>(Configured()));
+    }
+
+    [Fact]
+    public void ALockOfYourOwnCanBeKeptByRegisteringItAfterwards()
+    {
+        IAutoHttpsBuilder builder = Configured().UseDistributedLock<OwnLock>();
+
+        Assert.Equal(typeof(OwnLock), Registered<IDistributedLock>(builder));
+    }
+
+    [Fact]
     public void TheChallengeStoreCanBeKeptOutOfRedisAfterwards()
     {
         // Redis for certificates but not for challenges, for a deployment that already routes the
@@ -46,6 +61,12 @@ public sealed class RedisRegistrationTests
 
     private static Type? Registered<TService>(IAutoHttpsBuilder builder) =>
         Assert.Single(builder.Services, descriptor => descriptor.ServiceType == typeof(TService)).ImplementationType;
+
+    private sealed class OwnLock : IDistributedLock
+    {
+        public Task<IAsyncDisposable?> TryAcquireAsync(string name, CancellationToken cancellationToken) =>
+            Task.FromResult<IAsyncDisposable?>(null);
+    }
 
     private sealed class InProcessStore : IHttp01ChallengeStore
     {

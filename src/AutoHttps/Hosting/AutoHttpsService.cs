@@ -109,6 +109,14 @@ internal sealed class AutoHttpsService : BackgroundService
 
         Log.ServiceStarting(_logger, description);
 
+        if (_store is not FileSystemStore && _lock is FileSystemLock local)
+        {
+            // A store other instances can read, with a lock only this machine can see, is the setup in
+            // which every replica orders its own certificate at the same moment. It is also a correct
+            // setup for a single instance, so this is said once and not treated as an error.
+            Log.LockNotShared(_logger, _store.GetType().Name, local.Root);
+        }
+
         if (await AdoptFromStoreAsync(storeName, announce: false, stoppingToken) is { } stored)
         {
             // Kept so a later change of the configured names still finds this certificate. Done here

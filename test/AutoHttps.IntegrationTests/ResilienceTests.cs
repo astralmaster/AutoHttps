@@ -83,6 +83,57 @@ public class ResilienceTests
         Assert.Equal(0, authority.OrderAttempts);
     }
 
+    [Fact]
+    public async Task AStoreOtherInstancesCanReadWithALockOnlyThisMachineSeesIsPointedOut()
+    {
+        // The setup in which every replica orders its own certificate at the same moment. It is also
+        // right for a single instance, so it is said once rather than treated as a failure.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        await using TestApplication shared = await TestApplication.StartAsync(
+            authority,
+            options =>
+            {
+                options.DomainNames.Add("app.example.com");
+                options.StorageDirectory = storage.Path;
+            },
+            configureServices: services => services.Replace(ServiceDescriptor.Singleton<ICertificateStore, MemoryStore>()));
+
+        await shared.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+        Assert.Equal(1, shared.Log.CountOf(154));
+    }
+
+    [Fact]
+    public async Task TheDefaultStoreAndLockAreNotPointedOut()
+    {
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+        });
+
+        await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+        Assert.Equal(0, app.Log.CountOf(154));
+    }
+
+    private sealed class MemoryStore : ICertificateStore
+    {
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CertificateMaterial> _stored = new();
+
+        public Task<CertificateMaterial?> LoadAsync(string name, CancellationToken cancellationToken) =>
+            Task.FromResult(_stored.TryGetValue(name, out CertificateMaterial? material) ? material : null);
+
+        public Task SaveAsync(string name, CertificateMaterial material, CancellationToken cancellationToken)
+        {
+            _stored[name] = material;
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class FailureListener : IAutoHttpsCertificateListener
     {
         private int _count;

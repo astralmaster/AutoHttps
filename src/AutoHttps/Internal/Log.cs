@@ -286,4 +286,12 @@ internal static partial class Log
         Level = LogLevel.Debug,
         Message = "Looking up the existing ACME account was refused ({Detail}), so the account is registered instead.")]
     public static partial void AccountLookupRefused(ILogger logger, string detail);
+
+    [LoggerMessage(
+        EventId = 154,
+        Level = LogLevel.Information,
+        Message = "Certificates are kept in {Store}, which several instances can share, but the lock that stops " +
+                  "them ordering at the same time is a file under {Directory} that only this machine sees. If more " +
+                  "than one instance uses the store, register a shared lock with UseDistributedLock.")]
+    public static partial void LockNotShared(ILogger logger, string store, string directory);
 }

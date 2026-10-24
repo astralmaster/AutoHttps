@@ -11,6 +11,8 @@ internal sealed class FileSystemLock : IDistributedLock
 
     public FileSystemLock(string root) => _root = root;
 
+    public string Root => _root;
+
     public Task<IAsyncDisposable?> TryAcquireAsync(string name, CancellationToken cancellationToken)
     {
         EnsureDirectory();

@@ -27,4 +27,13 @@ public sealed class RedisStoreOptions
     /// they are removed.
     /// </summary>
     public TimeSpan ChallengeTtl { get; set; } = TimeSpan.FromMinutes(15);
+
+    internal static readonly TimeSpan DefaultLockLease = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// How long the lock that stops instances ordering at once survives without being renewed. The
+    /// holder renews it every third of this while its order runs, so it only bounds how long an
+    /// instance that died holding the lock keeps the others waiting. Defaults to 1 minute.
+    /// </summary>
+    public TimeSpan LockLease { get; set; } = DefaultLockLease;
 }
