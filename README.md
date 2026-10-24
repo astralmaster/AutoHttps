@@ -700,7 +700,7 @@ Every check is read only. What it looks at:
 | `clock` | How far this host's clock is from the authority's. A large difference makes it reject request signatures. |
 | `account-binding` | Whether the authority requires external account binding and whether one is configured. |
 | `profile` | Whether the authority offers the profile you asked for. |
-| `dns:<name>` | Whether the name resolves, and whether the resolver answers `SERVFAIL`, which almost always means a broken DNSSEC chain. A missing AAAA record is reported as normal rather than as a problem. |
+| `dns:<name>` | Whether the name resolves, and whether the resolver answers `SERVFAIL`, which almost always means a broken DNSSEC chain. A missing AAAA record is reported as normal rather than as a problem, and so is a name with only an AAAA record. A name validated by `dns-01` does not need an address at all. |
 | `caa:<name>` | Whether CAA records permit this authority, following the record set on the closest ancestor that has one. |
 | `challenge-path:<name>` | Publishes a token of its own and fetches it back over the public name, which is the only check that exercises the whole path the authority takes. |
 

@@ -330,6 +330,71 @@ public class AutoHttpsDiagnosticsTests
     }
 
     [Fact]
+    public async Task ANameWithOnlyAnIpv6AddressPasses()
+    {
+        // The authority validates over IPv6 when that is all there is, so reporting the missing A record
+        // as a failure points at the wrong cause after an order fails for some other reason.
+        var routes = new Routes
+        {
+            Dns = (_, type) => type == DnsRecordType.Aaaa
+                ? (DnsLookup.NoError, ["2001:db8::5"], false)
+                : (DnsLookup.NoError, [], false),
+        };
+
+        AutoHttpsCheck check = Find(await RunAsync(routes), "dns:app.example.com");
+
+        Assert.Equal(AutoHttpsCheckOutcome.Passed, check.Outcome);
+        Assert.Contains("IPv6", check.Detail, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(DnsLookup.NameError)]
+    [InlineData(DnsLookup.NoError)]
+    public async Task ANameValidatedByDns01NeedsNoAddress(int status)
+    {
+        // A dns-01 validation reads a TXT record and never connects to the name, which may well exist
+        // only internally.
+        var routes = new Routes { Dns = (_, _) => (status, [], false) };
+
+        AutoHttpsCheck check = Find(
+            await RunAsync(routes, configure: options => options.PreferredChallengeType = ChallengeTypes.Dns01),
+            "dns:app.example.com");
+
+        Assert.Equal(AutoHttpsCheckOutcome.Passed, check.Outcome);
+        Assert.Contains("dns-01", check.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AWildcardsBaseNameNeedsNoAddress()
+    {
+        var routes = new Routes { Dns = (_, _) => (DnsLookup.NameError, [], false) };
+
+        AutoHttpsDiagnosticsReport report = await RunAsync(routes, configure: options =>
+        {
+            options.DomainNames.Clear();
+            options.DomainNames.Add("*.example.com");
+        });
+
+        Assert.Equal(AutoHttpsCheckOutcome.Passed, Find(report, "dns:example.com").Outcome);
+    }
+
+    [Fact]
+    public async Task AServerFailureStillFailsANameValidatedByDns01()
+    {
+        // A broken DNSSEC chain stops the authority reading the TXT record too.
+        var routes = new Routes
+        {
+            Dns = (_, type) => type == DnsRecordType.A ? (DnsLookup.ServerFailure, [], false) : (DnsLookup.NoError, [], false),
+        };
+
+        AutoHttpsCheck check = Find(
+            await RunAsync(routes, configure: options => options.PreferredChallengeType = ChallengeTypes.Dns01),
+            "dns:app.example.com");
+
+        Assert.Equal(AutoHttpsCheckOutcome.Failed, check.Outcome);
+    }
+
+    [Fact]
     public async Task AValidatedChainIsReported()
     {
         var routes = new Routes

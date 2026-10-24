@@ -368,12 +368,18 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
                 continue;
             }
 
-            string name = domain.StartsWith("*.", StringComparison.Ordinal) ? domain[2..] : domain;
-            checks.Add(await CheckOneNameAsync(resolver, name, cancellationToken));
+            // A wildcard can only be validated by dns-01, and so can every name when that is the
+            // preferred challenge. The authority then reads a TXT record and never connects to the
+            // name, so the name does not need an address at all, as with one used only internally.
+            bool wildcard = domain.StartsWith("*.", StringComparison.Ordinal);
+            bool needsAddress = !wildcard && _options.PreferredChallengeType != ChallengeTypes.Dns01;
+
+            string name = wildcard ? domain[2..] : domain;
+            checks.Add(await CheckOneNameAsync(resolver, name, needsAddress, cancellationToken));
         }
     }
 
-    private async Task<AutoHttpsCheck> CheckOneNameAsync(Uri resolver, string name, CancellationToken cancellationToken)
+    private async Task<AutoHttpsCheck> CheckOneNameAsync(Uri resolver, string name, bool needsAddress, CancellationToken cancellationToken)
     {
         string check = "dns:" + name;
 
@@ -395,32 +401,54 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
                 "fails the same way");
         }
 
+        string dnssec = address.AuthenticatedData ? "DNSSEC validated" : "no DNSSEC";
+
         if (address.Status == DnsLookup.NameError)
         {
-            return new AutoHttpsCheck(
-                check,
-                AutoHttpsCheckOutcome.Failed,
-                "no such name (NXDOMAIN)",
-                "publish an A record for this name pointing at this host");
+            return needsAddress
+                ? new AutoHttpsCheck(
+                    check,
+                    AutoHttpsCheckOutcome.Failed,
+                    "no such name (NXDOMAIN)",
+                    "publish an A record for this name pointing at this host")
+                : new AutoHttpsCheck(
+                    check,
+                    AutoHttpsCheckOutcome.Passed,
+                    "the name does not resolve, which a dns-01 validation does not need");
         }
+
+        DnsLookupResult? aaaa = await _dns.QueryAsync(resolver, name, DnsRecordType.Aaaa, cancellationToken);
+        bool hasIpv6 = aaaa is { Records.Count: > 0 };
 
         if (address.Records.Count == 0)
         {
-            return new AutoHttpsCheck(
-                check,
-                AutoHttpsCheckOutcome.Failed,
-                string.Create(CultureInfo.InvariantCulture, $"the name resolved with status {address.Status} but returned no A record"),
-                "publish an A record for this name pointing at this host");
+            // An address of either family is enough. With only AAAA the authority validates over IPv6,
+            // which is a working setup rather than a missing record.
+            if (hasIpv6)
+            {
+                return new AutoHttpsCheck(
+                    check,
+                    AutoHttpsCheckOutcome.Passed,
+                    $"AAAA {string.Join(", ", aaaa!.Value.Records)}; no A record, so the authority reaches this name over IPv6 only; {dnssec}");
+            }
+
+            return needsAddress
+                ? new AutoHttpsCheck(
+                    check,
+                    AutoHttpsCheckOutcome.Failed,
+                    string.Create(CultureInfo.InvariantCulture, $"the name resolved with status {address.Status} but returned no A or AAAA record"),
+                    "publish an A record for this name pointing at this host")
+                : new AutoHttpsCheck(
+                    check,
+                    AutoHttpsCheckOutcome.Passed,
+                    $"the name has no address, which a dns-01 validation does not need; {dnssec}");
         }
 
         // A name with no AAAA record is ordinary and is reported as such, because the NXDOMAIN a resolver
         // returns for the missing AAAA is the line people mistake for the cause of a failure.
-        DnsLookupResult? aaaa = await _dns.QueryAsync(resolver, name, DnsRecordType.Aaaa, cancellationToken);
-        string sixth = aaaa is { Records.Count: > 0 } found
-            ? "AAAA " + string.Join(", ", found.Records)
+        string sixth = hasIpv6
+            ? "AAAA " + string.Join(", ", aaaa!.Value.Records)
             : "no AAAA record, which is normal";
-
-        string dnssec = address.AuthenticatedData ? "DNSSEC validated" : "no DNSSEC";
 
         return new AutoHttpsCheck(
             check,
