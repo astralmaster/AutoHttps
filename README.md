@@ -526,8 +526,9 @@ the wrong certificate. Set `ServeFallbackCertificate = false` to turn this off.
 
 Some deployments would rather fail fast than run without a real certificate. Set
 `RequireCertificateOnStartup = true` and, if the first certificate is not obtained within
-`StartupCertificateTimeout` (two minutes by default), AutoHttps stops the application, so an
-orchestrator restarts it rather than leaving it up serving the fallback. A certificate already in the
+`StartupCertificateTimeout` (two minutes by default), AutoHttps stops the application with exit code
+1, so an orchestrator or a restart policy such as systemd's `Restart=on-failure` restarts it rather
+than leaving it up serving the fallback. A certificate already in the
 store counts, so this only bites when the first one cannot be obtained. It cannot block startup itself:
 a `http-01` challenge needs the server already listening to be answered, so the check runs once the
 application has started. To keep an instance out of a load balancer instead of stopping it, use the

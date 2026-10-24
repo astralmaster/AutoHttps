@@ -26,10 +26,22 @@ public sealed class StartupCertificatePolicyTests
 
         var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
 
-        Assert.True(
-            await WaitForStoppingAsync(lifetime, TimeSpan.FromSeconds(15)),
-            "The application was not stopped after the startup certificate timeout." + Environment.NewLine + app.Log.Describe());
-        Assert.True(app.Log.CountOf(137) > 0);
+        try
+        {
+            Assert.True(
+                await WaitForStoppingAsync(lifetime, TimeSpan.FromSeconds(15)),
+                "The application was not stopped after the startup certificate timeout." + Environment.NewLine + app.Log.Describe());
+            Assert.True(app.Log.CountOf(137) > 0);
+
+            // A process that stops with exit code 0 is not restarted by systemd's Restart=on-failure or
+            // Docker's on-failure policy, which would leave it down rather than retrying.
+            Assert.NotEqual(0, Environment.ExitCode);
+        }
+        finally
+        {
+            // The exit code belongs to the whole test process.
+            Environment.ExitCode = 0;
+        }
     }
 
     [Fact]

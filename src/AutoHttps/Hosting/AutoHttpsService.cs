@@ -673,6 +673,15 @@ internal sealed class AutoHttpsService : BackgroundService
             }
 
             Log.StartupCertificateTimedOut(_logger, description, _options.StartupCertificateTimeout);
+
+            // Stopping alone ends the process with exit code 0, which restart policies such as systemd's
+            // Restart=on-failure and Docker's on-failure read as a clean shutdown, so the instance would
+            // stay down instead of being restarted. An exit code the application set already is kept.
+            if (Environment.ExitCode == 0)
+            {
+                Environment.ExitCode = 1;
+            }
+
             _lifetime.StopApplication();
         }
         catch (OperationCanceledException)

@@ -187,7 +187,8 @@ public sealed class AutoHttpsOptions
     /// <see cref="StartupCertificateTimeout"/> of startup. Defaults to <see langword="false"/>, which
     /// keeps the application running and serving the fallback while it retries. Set to
     /// <see langword="true"/> to fail fast instead, so an orchestrator restarts the instance rather
-    /// than leaving it up without a usable certificate. A certificate already in the store counts, so
+    /// than leaving it up without a usable certificate. The process then exits with code 1, unless the
+    /// application set another exit code itself. A certificate already in the store counts, so
     /// this only bites when the first one cannot be obtained. It cannot block startup itself, because a
     /// <c>http-01</c> challenge needs the server already listening to be answered.
     /// </summary>
