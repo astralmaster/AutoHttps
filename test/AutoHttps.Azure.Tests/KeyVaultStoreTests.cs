@@ -70,17 +70,96 @@ public sealed class KeyVaultStoreTests
     private static KeyVaultAccountKeyStore AccountKeyStore(FakeVault vault) =>
         new(vault, Options.Create(new AzureKeyVaultOptions { VaultUri = new Uri("https://v.vault.azure.net/") }));
 
+    [Fact]
+    public async Task ACertificateCanBeSavedAgainAfterItsSecretWasDeleted()
+    {
+        // Every vault soft-deletes, and a deleted secret keeps its name for the retention period.
+        // Deleting the secret to force a new certificate is the obvious move, and without recovery every
+        // later write would fail, so every restart would order a certificate it then cannot keep.
+        var vault = new FakeVault();
+        KeyVaultCertificateStore store = CertificateStore(vault);
+
+        await store.SaveAsync("site", new CertificateMaterial(Chain, Key), CancellationToken.None);
+        vault.SoftDelete(KeyVaultSecretNames.For("autohttps-", "cert", "site"));
+        Assert.Null(await store.LoadAsync("site", CancellationToken.None));
+
+        await store.SaveAsync("site", new CertificateMaterial(Chain + "-new", Key + "-new"), CancellationToken.None);
+
+        CertificateMaterial? loaded = await store.LoadAsync("site", CancellationToken.None);
+        Assert.Equal(Chain + "-new", loaded!.CertificateChainPem);
+        Assert.Equal(1, vault.Recoveries);
+    }
+
+    [Fact]
+    public async Task AnAccountKeyCanBeSavedAgainAfterItsSecretWasDeleted()
+    {
+        var vault = new FakeVault();
+        KeyVaultAccountKeyStore store = AccountKeyStore(vault);
+
+        await store.SaveAsync("acct", Key, CancellationToken.None);
+        vault.SoftDelete(KeyVaultSecretNames.For("autohttps-", "account", "acct"));
+
+        await store.SaveAsync("acct", Key + "-new", CancellationToken.None);
+
+        Assert.Equal(Key + "-new", await store.LoadAsync("acct", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AConflictWithNothingToRecoverIsReportedRatherThanIgnored()
+    {
+        var vault = new FakeVault { ConflictWithoutDeletedSecret = true };
+        KeyVaultCertificateStore store = CertificateStore(vault);
+
+        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => store.SaveAsync("site", new CertificateMaterial(Chain, Key), CancellationToken.None));
+
+        Assert.Contains("conflict", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Holds secrets the way Key Vault does with soft delete on, which it always is: a deleted secret
+    /// moves to a recycle bin, keeps its name there, and blocks a new secret of that name with a
+    /// conflict until it is recovered.
+    /// </summary>
     private sealed class FakeVault : IKeyVaultSecretClient
     {
         private readonly Dictionary<string, string> _store = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _deleted = new(StringComparer.Ordinal);
+
+        public bool ConflictWithoutDeletedSecret { get; init; }
+
+        public int Recoveries { get; private set; }
+
+        public void SoftDelete(string name)
+        {
+            _deleted[name] = _store[name];
+            _store.Remove(name);
+        }
 
         public Task<string?> GetAsync(string name, CancellationToken cancellationToken) =>
             Task.FromResult(_store.TryGetValue(name, out string? value) ? value : null);
 
-        public Task SetAsync(string name, string value, CancellationToken cancellationToken)
+        public Task<bool> TrySetAsync(string name, string value, CancellationToken cancellationToken)
         {
+            if (ConflictWithoutDeletedSecret || _deleted.ContainsKey(name))
+            {
+                return Task.FromResult(false);
+            }
+
             _store[name] = value;
-            return Task.CompletedTask;
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> RecoverDeletedAsync(string name, CancellationToken cancellationToken)
+        {
+            if (!_deleted.Remove(name, out string? value))
+            {
+                return Task.FromResult(false);
+            }
+
+            Recoveries++;
+            _store[name] = value;
+            return Task.FromResult(true);
         }
     }
 }

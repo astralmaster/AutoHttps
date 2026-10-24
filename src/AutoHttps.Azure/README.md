@@ -45,6 +45,10 @@ Certificates and the account key are stored as secrets. Key Vault names allow on
 and hyphens, so each store identifier becomes a sanitised name with a hash of the original appended,
 which keeps distinct identifiers from colliding.
 
+Every vault soft-deletes, so a secret you delete, for example to force a new certificate, keeps its name
+in the vault's recycle bin and blocks a new secret of that name. AutoHttps recovers it and then writes
+the new value over it, which needs the Recover permission on secrets (Key Vault Secrets Officer has it).
+
 ## Credentials
 
 Both parts use `DefaultAzureCredential` by default, which resolves a managed identity, environment
