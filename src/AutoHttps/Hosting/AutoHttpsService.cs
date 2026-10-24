@@ -210,7 +210,25 @@ internal sealed class AutoHttpsService : BackgroundService
         string description,
         CancellationToken cancellationToken)
     {
-        IAsyncDisposable? handle = await _lock.TryAcquireAsync(storeName, cancellationToken);
+        IAsyncDisposable? handle;
+        try
+        {
+            handle = await _lock.TryAcquireAsync(storeName, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // A lock that cannot be taken stops every order as surely as a failed one, which is what a
+            // storage directory that cannot be written looks like, so it is counted the same way: the
+            // failure count, the overdue escalation, the listeners and the diagnostics all hear of it.
+            // It keeps event 122, because retrying does not fix it.
+            Log.UnexpectedFailure(_logger, description, _nextRetry, ex);
+            await ReportFailureAsync(ex, cancellationToken);
+            return AcquisitionOutcome.Failed;
+        }
 
         if (handle is null)
         {

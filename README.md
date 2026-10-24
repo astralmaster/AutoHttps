@@ -761,7 +761,9 @@ builder.Services.AddAutoHttps(options => { /* ... */ })
 `OnCertificateChangedAsync` runs after a new certificate has been saved and is being served, and only
 when the served certificate has actually changed, so the reload happens when there is something new
 to load rather than on every renewal check. `OnCertificateFailedAsync` runs after an order fails,
-which is where a "notify on failure" hook goes. Both are awaited on the renewal loop, so keep them
+and also when no order could be placed because the lock could not be taken, as with a storage
+directory that cannot be written. That is where a "notify on failure" hook goes. Both are awaited on
+the renewal loop, so keep them
 quick; a listener that throws is logged as event 129 and cannot affect the certificate, which is
 already in use by the time a change is reported.
 

@@ -45,6 +45,64 @@ public class ResilienceTests
     }
 
     [Fact]
+    public async Task ALockThatThrowsIsCountedAsAFailedAttempt()
+    {
+        // A storage directory that cannot be written makes the lock throw before any order is placed.
+        // Nothing is ever going to be issued, so the failure count, the listeners and the overdue
+        // escalation must all hear of it, as they would of a failed order.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        var failures = new FailureListener();
+
+        await using TestApplication app = await TestApplication.StartAsync(
+            authority,
+            options =>
+            {
+                options.DomainNames.Add("app.example.com");
+                options.StorageDirectory = storage.Path;
+            },
+            configureServices: services =>
+            {
+                services.Replace(ServiceDescriptor.Singleton<IDistributedLock, ThrowingLock>());
+                services.AddSingleton<IAutoHttpsCertificateListener>(failures);
+            });
+
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (failures.Count < 2 && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(100);
+        }
+
+        AutoHttpsCertificateStatus status = app.Services.GetRequiredService<IAutoHttpsCertificateInspector>().GetStatus();
+
+        Assert.True(failures.Count >= 2, "The listener never heard of the failures." + Environment.NewLine + app.Log.Describe());
+        Assert.Contains("not writable", failures.LastReason, StringComparison.Ordinal);
+        Assert.True(status.ConsecutiveFailures >= 2);
+        Assert.Contains("not writable", status.LastFailureReason, StringComparison.Ordinal);
+        Assert.True(app.Log.CountOf(122) >= 2);
+        Assert.Equal(0, authority.OrderAttempts);
+    }
+
+    private sealed class FailureListener : IAutoHttpsCertificateListener
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public string? LastReason { get; private set; }
+
+        public Task OnCertificateChangedAsync(CertificateChangedContext context, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public Task OnCertificateFailedAsync(CertificateFailedContext context, CancellationToken cancellationToken)
+        {
+            LastReason = context.Reason;
+            Interlocked.Increment(ref _count);
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
     public async Task AStoreThatCannotSaveStillLeavesTheCertificateInUse()
     {
         using var storage = new TempStorage();
