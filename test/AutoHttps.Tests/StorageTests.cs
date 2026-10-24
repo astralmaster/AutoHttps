@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 using AutoHttps.Certificates;
@@ -193,20 +194,57 @@ public class FileSystemStoreTests : IDisposable
         Assert.Null(await store.LoadAsync("site", CancellationToken.None));
     }
 
-    [Fact]
-    public async Task RestrictsPermissionsOnUnix()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
+    private const UnixFileMode OwnerOnlyFile = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+    private const UnixFileMode OwnerOnlyDirectory = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 
+    [UnixFact]
+    [UnsupportedOSPlatform("windows")]
+    public async Task KeyFilesAreReadableByTheirOwnerOnly()
+    {
         var store = new FileSystemStore(_root);
         await store.SaveAsync("site", new CertificateMaterial("chain", "key"), CancellationToken.None);
+        await ((IAccountKeyStore)store).SaveAsync("account", "acct", CancellationToken.None);
 
-        UnixFileMode mode = File.GetUnixFileMode(Path.Combine(_root, "site.key.pem"));
+        Assert.Equal(OwnerOnlyFile, File.GetUnixFileMode(Path.Combine(_root, "site.key.pem")));
+        Assert.Equal(OwnerOnlyFile, File.GetUnixFileMode(Path.Combine(_root, "site.crt.pem")));
+        Assert.Equal(OwnerOnlyFile, File.GetUnixFileMode(Path.Combine(_root, "account.account.pem")));
+    }
 
-        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, mode);
+    [UnixFact]
+    [UnsupportedOSPlatform("windows")]
+    public async Task TheDirectoryIsPrivateWhenTheStoreCreatesIt()
+    {
+        await new FileSystemStore(_root).SaveAsync("site", new CertificateMaterial("chain", "key"), CancellationToken.None);
+
+        Assert.Equal(OwnerOnlyDirectory, File.GetUnixFileMode(_root));
+    }
+
+    [UnixFact]
+    [UnsupportedOSPlatform("windows")]
+    public async Task TheDirectoryIsPrivateWhenTheLockCreatesIt()
+    {
+        // The lock is taken before anything is written, so in practice it is what creates the
+        // directory. Creating it with the default mode left it listable by every local user.
+        await using (IAsyncDisposable? held = await new FileSystemLock(_root).TryAcquireAsync("site", CancellationToken.None))
+        {
+            Assert.NotNull(held);
+        }
+
+        Assert.Equal(OwnerOnlyDirectory, File.GetUnixFileMode(_root));
+    }
+
+    [UnixFact]
+    [UnsupportedOSPlatform("windows")]
+    public async Task ADirectoryThatAlreadyExistsKeepsTheModeItWasGiven()
+    {
+        // A mounted volume set up for a group, for example by a Kubernetes fsGroup, is the operator's
+        // decision, so only a directory AutoHttps creates is restricted.
+        UnixFileMode chosen = OwnerOnlyDirectory | UnixFileMode.GroupRead | UnixFileMode.GroupExecute;
+        Directory.CreateDirectory(_root, chosen);
+
+        await new FileSystemStore(_root).SaveAsync("site", new CertificateMaterial("chain", "key"), CancellationToken.None);
+
+        Assert.Equal(chosen, File.GetUnixFileMode(_root));
     }
 }
 

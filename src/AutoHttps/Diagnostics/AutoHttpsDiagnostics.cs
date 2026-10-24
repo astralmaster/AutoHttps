@@ -137,7 +137,7 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
 
         try
         {
-            Directory.CreateDirectory(directory);
+            FileSystemStore.CreatePrivateDirectory(directory);
             File.WriteAllText(probe, string.Empty);
             File.Delete(probe);
 

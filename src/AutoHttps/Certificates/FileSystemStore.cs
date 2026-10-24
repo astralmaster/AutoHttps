@@ -99,15 +99,28 @@ internal sealed class FileSystemStore : ICertificateStore, IAccountKeyStore
         File.Move(await StageAsync(path, privateKeyPem, cancellationToken), path, overwrite: true);
     }
 
-    private void EnsureRoot()
+    private void EnsureRoot() => CreatePrivateDirectory(_root);
+
+    /// <summary>
+    /// Creates the storage directory, readable only by the user this process runs as, unless it
+    /// already exists. Every component that might be first to create it goes through here: whichever
+    /// is first decides its permissions, and an existing directory is left as the operator set it.
+    /// </summary>
+    internal static void CreatePrivateDirectory(string path)
     {
-        if (Directory.Exists(_root))
+        if (Directory.Exists(path))
         {
             return;
         }
 
-        Directory.CreateDirectory(_root);
-        RestrictDirectory(_root);
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.CreateDirectory(path);
+        }
+        else
+        {
+            Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
     }
 
     /// <summary>Writes the content to a temporary file next to its destination and returns that path.</summary>
@@ -117,10 +130,22 @@ internal sealed class FileSystemStore : ICertificateStore, IAccountKeyStore
         // the move that publishes it is atomic, so a reader never sees a half written certificate.
         string temporary = path + "." + Guid.NewGuid().ToString("n")[..8] + ".tmp";
 
+        // The file is created with its final permissions rather than changed afterwards: a key written
+        // under the default mode and restricted only once the write finished is readable by any local
+        // user for that moment, long enough for one watching the directory to open it.
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows())
+        {
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
         try
         {
-            await File.WriteAllTextAsync(temporary, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
-            RestrictFile(temporary);
+            await using (var stream = new FileStream(temporary, options))
+            await using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+            {
+                await writer.WriteAsync(content.AsMemory(), cancellationToken);
+            }
 
             return temporary;
         }
@@ -142,22 +167,6 @@ internal sealed class FileSystemStore : ICertificateStore, IAccountKeyStore
         }
         catch (UnauthorizedAccessException)
         {
-        }
-    }
-
-    private static void RestrictDirectory(string path)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-    }
-
-    private static void RestrictFile(string path)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
     }
 }

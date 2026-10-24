@@ -47,10 +47,9 @@ internal sealed class FileSystemLock : IDistributedLock
     {
         try
         {
-            if (!Directory.Exists(_root))
-            {
-                Directory.CreateDirectory(_root);
-            }
+            // The lock is usually the first thing to touch the directory, so it creates it the way the
+            // store would, readable by this user only.
+            Certificates.FileSystemStore.CreatePrivateDirectory(_root);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
