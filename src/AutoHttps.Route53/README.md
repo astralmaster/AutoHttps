@@ -44,7 +44,12 @@ config, or an instance role. Set them explicitly if you need to:
 | `HostedZoneId` | *(discovered)* | The zone to publish in. Leave unset to find it from the record name. |
 | `AccessKeyId` / `SecretAccessKey` | *(default chain)* | Explicit credentials. |
 | `Region` | *(SDK default)* | The region to sign for, for example `us-east-1`. |
-| `RecordTtlSeconds` | 60 | TTL for the challenge records. |
+| `RecordTtlSeconds` | 60 | TTL for the challenge records. A record set that already exists keeps its own. |
+
+Route 53 keeps every TXT value at a name in one record set, and a wildcard with its apex, or another
+client ordering for the same name, puts more than one value at `_acme-challenge`. The provider adds its
+value to whatever is there and later removes only that value, deleting the set only when nothing else
+is left in it.
 
 A minimum policy grants `route53:ChangeResourceRecordSets` and `route53:ListResourceRecordSets` on the
 hosted zone, plus `route53:ListHostedZonesByName` when the zone is discovered.

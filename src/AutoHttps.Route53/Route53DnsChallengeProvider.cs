@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
@@ -28,28 +29,56 @@ public sealed class Route53DnsChallengeProvider : IDnsChallengeProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Route 53 keeps every TXT value at a name in one record set, and an UPSERT replaces the whole set.
+    /// Other values can be there for good reasons: a wildcard and its apex in one order both use
+    /// <c>_acme-challenge</c> at the apex, and so does another application or cert-manager ordering
+    /// for the same name. So the value is added to what is there rather than written over it.
+    /// </remarks>
     public async Task CreateTxtRecordAsync(string recordName, string recordValue, CancellationToken cancellationToken)
     {
         string zoneId = await ResolveZoneIdAsync(recordName, cancellationToken);
+        string value = Quote(recordValue);
 
-        // Route 53 stores TXT values quoted. A single value replaces the record set, which is safe
-        // here because AutoHttps withdraws each challenge record before it publishes the next.
-        await _client.ChangeTxtAsync(zoneId, recordName, "UPSERT", _options.RecordTtlSeconds, [Quote(recordValue)], cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public async Task DeleteTxtRecordAsync(string recordName, string recordValue, CancellationToken cancellationToken)
-    {
-        string zoneId = await ResolveZoneIdAsync(recordName, cancellationToken);
-
-        // A DELETE has to name the record set exactly as it stands, so the current values and TTL are
-        // read first. No record means there is nothing to remove, which is a success.
         Route53TxtRecord? existing = await _client.GetTxtRecordAsync(zoneId, recordName, cancellationToken);
-        if (existing is null)
+        if (existing is not null && existing.Values.Contains(value, StringComparer.Ordinal))
         {
             return;
         }
 
+        // An existing set keeps its own TTL, which belongs to whoever created it.
+        IReadOnlyList<string> values = existing is null ? [value] : [.. existing.Values, value];
+        long ttl = existing?.Ttl ?? _options.RecordTtlSeconds;
+
+        await _client.ChangeTxtAsync(zoneId, recordName, "UPSERT", ttl, values, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Only the value this provider added is taken out. The set is deleted only when that value was the
+    /// last one in it, and a set that does not hold the value is left as it is.
+    /// </remarks>
+    public async Task DeleteTxtRecordAsync(string recordName, string recordValue, CancellationToken cancellationToken)
+    {
+        string zoneId = await ResolveZoneIdAsync(recordName, cancellationToken);
+        string value = Quote(recordValue);
+
+        Route53TxtRecord? existing = await _client.GetTxtRecordAsync(zoneId, recordName, cancellationToken);
+        if (existing is null || !existing.Values.Contains(value, StringComparer.Ordinal))
+        {
+            return;
+        }
+
+        string[] remaining = [.. existing.Values.Where(stored => !string.Equals(stored, value, StringComparison.Ordinal))];
+
+        if (remaining.Length > 0)
+        {
+            await _client.ChangeTxtAsync(zoneId, recordName, "UPSERT", existing.Ttl, remaining, cancellationToken);
+            return;
+        }
+
+        // A DELETE has to name the record set exactly as it stands, so it carries the values and TTL
+        // that were just read.
         await _client.ChangeTxtAsync(zoneId, recordName, "DELETE", existing.Ttl, existing.Values, cancellationToken);
     }
 
