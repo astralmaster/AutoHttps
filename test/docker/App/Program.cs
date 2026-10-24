@@ -42,6 +42,15 @@ builder.Services.AddAutoHttps(options =>
     {
         options.RenewalCheckInterval = TimeSpan.FromSeconds(double.Parse(seconds, System.Globalization.CultureInfo.InvariantCulture));
     }
+
+    // Stops the application when no certificate arrives in time. What the rig checks is the exit code
+    // the container ends with, because a restart policy decides on that and nothing in a test process
+    // can stand in for it.
+    if (Environment.GetEnvironmentVariable("REQUIRE_CERTIFICATE_SECONDS") is { Length: > 0 } required)
+    {
+        options.RequireCertificateOnStartup = true;
+        options.StartupCertificateTimeout = TimeSpan.FromSeconds(double.Parse(required, System.Globalization.CultureInfo.InvariantCulture));
+    }
 });
 
 if (offerHttp3)

@@ -25,6 +25,21 @@ docker run --rm --network autohttps-acme \
 `MODE=defaults` uses Kestrel's HTTPS defaults instead. `PROFILE`, `RENEWAL_THRESHOLD` and
 `RENEWAL_CHECK_SECONDS` compress months of renewals into minutes for soak testing.
 
+## Exit code when no certificate arrives
+
+`REQUIRE_CERTIFICATE_SECONDS` turns on `RequireCertificateOnStartup` with that timeout. Pointed at an
+authority that cannot be reached, the container has to stop with exit code 1, because restart policies
+such as Docker's `on-failure` leave a container that exited with 0 stopped:
+
+```
+docker run --name startup-exit --network autohttps-acme \
+  -e DOMAIN=app.autohttps.test \
+  -e ACME_DIRECTORY=https://unreachable.invalid/dir \
+  -e REQUIRE_CERTIFICATE_SECONDS=5 \
+  autohttps-linux-app
+docker inspect --format '{{.State.ExitCode}}' startup-exit
+```
+
 ## HTTP/3
 
 `PROTOCOLS=h3` puts `Http1AndHttp2AndHttp3` on the HTTPS endpoint, and `SELFTEST=h3` makes the
