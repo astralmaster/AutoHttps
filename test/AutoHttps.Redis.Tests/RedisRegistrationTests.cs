@@ -24,6 +24,40 @@ public sealed class RedisRegistrationTests
     }
 
     [Fact]
+    public async Task TheStoresCanBeBuiltWhileRedisIsDown()
+    {
+        // The connection is made while the host builds its services. Throwing there would stop the
+        // application from starting at all whenever Redis is briefly unavailable, as during a deploy.
+        ServiceProvider services = new ServiceCollection()
+            .AddLogging()
+            .AddAutoHttps(options =>
+            {
+                options.DomainNames.Add("app.example.com");
+                options.EmailAddress = "operator@example.com";
+                options.AcceptTermsOfService = true;
+            })
+            .UseRedis("127.0.0.1:1,connectTimeout=500")
+            .Services
+            .BuildServiceProvider();
+
+        await using (services)
+        {
+            ICertificateStore store = services.GetRequiredService<ICertificateStore>();
+            Assert.False(services.GetRequiredService<StackExchange.Redis.IConnectionMultiplexer>().IsConnected);
+
+            // Using the store fails, which AutoHttps treats as a failed attempt and retries.
+            await Assert.ThrowsAnyAsync<Exception>(() => store.LoadAsync("anything", CancellationToken.None));
+        }
+    }
+
+    [Theory]
+    [InlineData("localhost:6379", false)]
+    [InlineData("localhost:6379,abortConnect=true", true)]
+    [InlineData("localhost:6379,AbortConnect=false", false)]
+    public void AnExplicitAbortConnectIsLeftAsConfigured(string configuration, bool expected) =>
+        Assert.Equal(expected, AutoHttpsRedisBuilderExtensions.CreateConfiguration(configuration).AbortOnConnectFail);
+
+    [Fact]
     public void UseRedisCoordinatesInstancesThroughTheSameRedis()
     {
         // Sharing the certificate without sharing the lock is what made every replica order at once.

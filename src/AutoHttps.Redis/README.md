@@ -34,6 +34,10 @@ you share the Redis with other things:
 If your application already registers an `IConnectionMultiplexer`, that one is used and the connection
 string here is ignored.
 
+The application starts even when Redis cannot be reached: unless the connection string sets
+`abortConnect` itself, the connection is retried in the background, and AutoHttps treats a store it
+cannot reach as a failed attempt and tries again.
+
 ## Coordinating instances
 
 Instances sharing a certificate also share its renewal time, so without a shared lock they would all

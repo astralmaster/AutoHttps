@@ -47,7 +47,7 @@ public static class AutoHttpsRedisBuilderExtensions
         builder.Services.TryAddSingleton<IConnectionMultiplexer>(provider =>
         {
             RedisStoreOptions options = provider.GetRequiredService<IOptions<RedisStoreOptions>>().Value;
-            return ConnectionMultiplexer.Connect(options.Configuration!);
+            return ConnectionMultiplexer.Connect(CreateConfiguration(options.Configuration!));
         });
 
         builder.Services.Replace(ServiceDescriptor.Singleton<ICertificateStore, RedisCertificateStore>());
@@ -60,5 +60,24 @@ public static class AutoHttpsRedisBuilderExtensions
         builder.Services.Replace(ServiceDescriptor.Singleton<IDistributedLock, RedisDistributedLock>());
 
         return builder;
+    }
+
+    /// <summary>
+    /// StackExchange.Redis gives up at once when the server cannot be reached unless told otherwise,
+    /// and the connection is made while the host builds the AutoHttps services, so Redis restarting
+    /// during a deploy would stop every instance from starting at all. Reconnecting in the background
+    /// is what the rest of AutoHttps expects of a store: one that cannot be reached fails an attempt,
+    /// and the attempt is retried. A connection string that sets abortConnect itself is left alone.
+    /// </summary>
+    internal static ConfigurationOptions CreateConfiguration(string configuration)
+    {
+        ConfigurationOptions options = ConfigurationOptions.Parse(configuration);
+
+        if (!configuration.Contains("abortConnect", StringComparison.OrdinalIgnoreCase))
+        {
+            options.AbortOnConnectFail = false;
+        }
+
+        return options;
     }
 }
