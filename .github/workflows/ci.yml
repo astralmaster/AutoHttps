@@ -11,7 +11,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, windows-latest ]
+        # macOS loads certificates through its own keychain code, which refuses flags the other two
+        # accept, so a change that is fine on Linux and Windows can still break every load there.
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
 
     runs-on: ${{ matrix.os }}
 

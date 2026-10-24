@@ -16,10 +16,22 @@ internal static class CertificateFactory
     // a container that lives only as long as the certificate object and is removed when it is disposed
     // (no PersistKeySet). It is not marked exportable: nothing here exports the served certificate, and
     // a key that cannot be exported is one less piece of material a long-running host can leak.
-    // Everywhere else an ephemeral key keeps the material out of any on-disk store to begin with.
-    internal static readonly X509KeyStorageFlags StorageFlags = OperatingSystem.IsWindows()
-        ? X509KeyStorageFlags.DefaultKeySet
-        : X509KeyStorageFlags.Exportable | X509KeyStorageFlags.EphemeralKeySet;
+    // macOS cannot load a PKCS#12 with EphemeralKeySet at all (PlatformNotSupportedException), so it
+    // gets the temporary keychain .NET creates there instead. Everywhere else an ephemeral key keeps
+    // the material out of any on-disk store to begin with.
+    internal static readonly X509KeyStorageFlags StorageFlags = SelectStorageFlags();
+
+    private static X509KeyStorageFlags SelectStorageFlags()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return X509KeyStorageFlags.DefaultKeySet;
+        }
+
+        return OperatingSystem.IsMacOS()
+            ? X509KeyStorageFlags.Exportable
+            : X509KeyStorageFlags.Exportable | X509KeyStorageFlags.EphemeralKeySet;
+    }
 
     public static byte[] CreateSigningRequest(IReadOnlyList<string> identifiers, CertificateKey key)
     {
