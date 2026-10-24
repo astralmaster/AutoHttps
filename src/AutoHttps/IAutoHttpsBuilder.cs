@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using AutoHttps.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -145,7 +146,21 @@ internal sealed class AutoHttpsBuilder : IAutoHttpsBuilder
     public IAutoHttpsBuilder AddCertificateListener(IAutoHttpsCertificateListener listener)
     {
         ArgumentNullException.ThrowIfNull(listener);
-        Services.TryAddEnumerable(ServiceDescriptor.Singleton(listener));
+
+        // TryAddEnumerable tells registrations apart by implementation type, which for an instance is
+        // its runtime type, so a second instance of the same class, say a webhook listener for each of
+        // two endpoints, was dropped without a word. Instances are told apart by identity instead, so
+        // only the same instance added twice is registered once.
+        bool registered = Services.Any(descriptor =>
+            descriptor.ServiceType == typeof(IAutoHttpsCertificateListener) &&
+            !descriptor.IsKeyedService &&
+            ReferenceEquals(descriptor.ImplementationInstance, listener));
+
+        if (!registered)
+        {
+            Services.AddSingleton(listener);
+        }
+
         return this;
     }
 

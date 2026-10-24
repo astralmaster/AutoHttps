@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AutoHttps.Hosting;
@@ -38,6 +39,27 @@ public class CertificateEventPublisherTests
 
         Assert.Equal(CertificateChangeReason.Renewed, recording.LastChange?.Reason);
         Assert.NotNull(recording.LastFailure);
+    }
+
+    [Fact]
+    public void TwoInstancesOfTheSameListenerClassAreBothRegistered()
+    {
+        // One class configured twice, for example a webhook per endpoint. Telling them apart by type
+        // dropped the second without a word, so only one endpoint ever heard of a renewal.
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        IAutoHttpsBuilder builder = services.AddAutoHttps(options => options.DomainNames.Add("app.example.com"));
+        var first = new RecordingListener();
+        var second = new RecordingListener();
+
+        builder.AddCertificateListener(first).AddCertificateListener(second).AddCertificateListener(first);
+
+        object?[] registered = [.. services
+            .Where(descriptor => descriptor.ServiceType == typeof(IAutoHttpsCertificateListener))
+            .Select(descriptor => descriptor.ImplementationInstance)];
+
+        Assert.Equal(2, registered.Length);
+        Assert.Contains(first, registered);
+        Assert.Contains(second, registered);
     }
 
     private static CertificateEventPublisher Publisher(params IAutoHttpsCertificateListener[] listeners) =>
