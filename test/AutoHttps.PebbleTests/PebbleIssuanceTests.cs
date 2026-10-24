@@ -211,6 +211,51 @@ public class PebbleIssuanceTests
             Environment.NewLine + app.Log.Describe());
     }
 
+    [Fact]
+    public async Task RecoversWhenPebbleRefusesToRenewACertificateIssuedToAnotherAccount()
+    {
+        string domain = NewDomain();
+        string issuedToFirstAccount;
+
+        using (var firstStorage = new TempStorage())
+        {
+            await using PebbleApplication first = await PebbleApplication.StartAsync(_pebble, options =>
+            {
+                options.DomainNames.Add(domain);
+                options.StorageDirectory = firstStorage.Path;
+                options.EmailAddress = "first-account@example.com";
+            });
+
+            ServerCertificate issued = await first.WaitForCertificateAsync(domain, Timeout);
+            issuedToFirstAccount = AcmeCertificateId.TryCompute(issued.Leaf, out string id)
+                ? id
+                : throw new InvalidOperationException("The issued certificate has no ACME renewal identifier.");
+        }
+
+        // A second account, as after a change of email address or a lost account key, renewing the
+        // certificate the first one was issued. Pebble refuses that with 403 unauthorized, the same as
+        // Boulder, and the client has to order without the hint to get a certificate at all.
+        using var secondStorage = new TempStorage();
+        await using PebbleApplication second = await PebbleApplication.StartAsync(_pebble, options =>
+        {
+            options.DomainNames.Add(domain);
+            options.StorageDirectory = secondStorage.Path;
+            options.EmailAddress = "second-account@example.com";
+        });
+
+        var acquirer = second.Services.GetRequiredService<CertificateAcquirer>();
+        CertificateMaterial renewed = await acquirer.AcquireAsync([domain], issuedToFirstAccount, CancellationToken.None);
+
+        using X509Certificate2 leaf = X509Certificate2.CreateFromPem(renewed.CertificateChainPem);
+        Assert.Contains(domain, DnsNamesOf(leaf));
+
+        // Event 148 fires only on that recovery path, so seeing it proves Pebble refused the hint.
+        Assert.True(
+            second.Log.CountOf(148) > 0,
+            "Pebble did not refuse the replaces hint from the second account, so the recovery never ran:" +
+            Environment.NewLine + second.Log.Describe());
+    }
+
     private static string CertificateIdOf(CertificateMaterial material)
     {
         using X509Certificate2 leaf = X509Certificate2.CreateFromPem(material.CertificateChainPem);

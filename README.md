@@ -132,7 +132,7 @@ The quick start covers the common case. These are the rest:
 | Option | Default | What it does |
 |---|---|---|
 | `DomainNames` | *(required)* | Domains to request. A `*.` entry needs `DnsChallengeProvider`. |
-| `EmailAddress` | *(required)* | Contact registered with the authority. Changing it later registers a new account. |
+| `EmailAddress` | *(required)* | Contact registered with the authority. Changing it later registers a new account, and the next renewal is ordered without the renewal hint, because the authority does not accept a renewal of the previous account's certificate. |
 | `AcceptTermsOfService` | `false` | Must be `true`. Startup fails otherwise. |
 | `CertificateAuthority` | Let's Encrypt | The ACME directory URL. |
 | `Profile` | *(none)* | Certificate profile to request, e.g. `shortlived`. |
@@ -579,10 +579,12 @@ exists for diagnosis, not alerting.
 | 109 | Information | When the current certificate will be renewed. |
 | 116 | Information | The service started and is managing these domains. |
 | 120 | Information | A certificate published by another instance was picked up. |
+| 128 | Information | The authority had already accepted a renewal of this certificate, so it was ordered again without the renewal hint. |
 | 130 | Information | A development certificate is being served and ACME is disabled in this environment. |
 | 132 | Information | The alternate certificate chain requested with `PreferredChain` is being served. |
 | 138 | Information | A certificate was revoked at the authority. |
 | 145 | Information | The diagnostics ran after a failed order and found nothing wrong. See "Diagnosing a failure". |
+| 148 | Information | The authority would not accept the order as a renewal, usually because the certificate belongs to the account used before the email address or account key changed. It was ordered again without the renewal hint. |
 | 110 | Warning | An order failed and will be retried. The reason is in the message; the stack trace is logged separately at Debug as event 124. |
 | 112 | Warning | A self-signed fallback is being served, logged once rather than per handshake. |
 | 114 | Warning | The store could not be read; continuing without a cached certificate. |

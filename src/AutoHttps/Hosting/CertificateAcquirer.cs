@@ -50,19 +50,6 @@ internal sealed class CertificateAcquirer
 
             return await OrderAsync(identifiers, replacesCertificateId, cancellationToken);
         }
-        catch (AcmeException ex) when (replacesCertificateId is not null && ex.ErrorType == AcmeErrorTypes.AlreadyReplaced)
-        {
-            // The replaces field (RFC 9773) only tells the authority this is a renewal, so it can
-            // waive a rate limit. The authority has already accepted an order replacing this
-            // certificate and refuses a second one that names it. That happens when a previous
-            // renewal reached the authority but its result never became the certificate in hand, for
-            // example a restart between finalizing and persisting. Keeping the field would fail the
-            // same way on every attempt and the certificate would never renew. Ordering again without
-            // it still gets the certificate.
-            Log.CertificateAlreadyReplaced(_logger, ex.Detail ?? ex.Message);
-
-            return await OrderAsync(identifiers, replacesCertificateId: null, cancellationToken);
-        }
     }
 
     private async Task<CertificateMaterial> OrderAsync(
@@ -75,11 +62,7 @@ internal sealed class CertificateAcquirer
         string description = string.Join(", ", identifiers);
         Log.OrderStarting(_logger, description, _options.CertificateAuthority);
 
-        AcmeOrder order = await client.CreateOrderAsync(
-            [.. identifiers.Select(CreateIdentifier)],
-            _options.Profile,
-            replacesCertificateId,
-            cancellationToken);
+        AcmeOrder order = await CreateOrderAsync(client, identifiers, replacesCertificateId, cancellationToken);
 
         foreach (Uri authorizationUrl in order.Resource.Authorizations ?? [])
         {
@@ -117,6 +100,57 @@ internal sealed class CertificateAcquirer
 
         return new CertificateMaterial(chain, key.ExportPem());
     }
+
+    /// <summary>
+    /// Places the order, dropping the replaces field (RFC 9773) if the authority will not accept the
+    /// order as a renewal. The field only tells the authority this order renews an earlier
+    /// certificate, so it can waive a rate limit, but an authority that rejects it refuses the whole
+    /// order: alreadyReplaced when an earlier order already named that certificate, unauthorized when
+    /// it was issued to a different account, and malformed or not found when the authority cannot
+    /// match it. The account changes with the email address or a lost account key while the stored
+    /// certificate stays, so the second case is an ordinary operation, not an edge case. Each would
+    /// fail the same way on every attempt and the certificate would never be replaced.
+    /// </summary>
+    private async Task<AcmeOrder> CreateOrderAsync(
+        AcmeClient client,
+        IReadOnlyList<string> identifiers,
+        string? replacesCertificateId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await client.CreateOrderAsync(
+                [.. identifiers.Select(CreateIdentifier)],
+                _options.Profile,
+                replacesCertificateId,
+                cancellationToken);
+        }
+        catch (AcmeException ex) when (replacesCertificateId is not null && IsRenewalRefused(ex))
+        {
+            if (ex.ErrorType == AcmeErrorTypes.AlreadyReplaced)
+            {
+                Log.CertificateAlreadyReplaced(_logger, ex.Detail ?? ex.Message);
+            }
+            else
+            {
+                Log.RenewalNotAccepted(_logger, ex.Detail ?? ex.Message);
+            }
+
+            return await client.CreateOrderAsync(
+                [.. identifiers.Select(CreateIdentifier)],
+                _options.Profile,
+                replaces: null,
+                cancellationToken);
+        }
+    }
+
+    // A refusal of the order itself, as opposed to a request the authority could not process at all.
+    // A rate limit or a stale nonce has nothing to do with the field, and an unknown account has to
+    // reach the re-registration in AcquireAsync.
+    internal static bool IsRenewalRefused(AcmeException exception) =>
+        exception is not AcmeRateLimitException &&
+        exception.StatusCode is >= 400 and < 500 &&
+        exception.ErrorType is not (AcmeErrorTypes.BadNonce or AcmeErrorTypes.AccountDoesNotExist);
 
     private async Task<string> SelectChainAsync(AcmeClient client, Uri certificateUrl, CancellationToken cancellationToken)
     {

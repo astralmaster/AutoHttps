@@ -89,6 +89,9 @@ internal sealed class TestIssuedCertificate
 {
     public required string Id { get; init; }
 
+    /// <summary>The account that ordered it, which a later replaces naming it must come from.</summary>
+    public required string AccountId { get; init; }
+
     public required string ChainPem { get; init; }
 
     /// <summary>An alternate chain for the same leaf, offered with Link rel="alternate" when set.</summary>

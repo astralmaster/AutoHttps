@@ -46,6 +46,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     private int _orderCount;
     private int _orderAttempts;
     private int _sawReplaces;
+    private int _refusedReplaces;
     private readonly ConcurrentQueue<DateTimeOffset> _orderAttemptTimes = new();
     private readonly ConcurrentQueue<DateTimeOffset> _authorizationPollTimes = new();
 
@@ -88,6 +89,10 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
 
     /// <summary>Whether any order this authority received carried an RFC 9773 replaces field.</summary>
     public bool SawReplaces => Volatile.Read(ref _sawReplaces) == 1;
+
+    /// <summary>How many orders were refused because their replaces field named a certificate the
+    /// authority could not match to the ordering account.</summary>
+    public int RefusedReplaces => Volatile.Read(ref _refusedReplaces);
 
     public IReadOnlyList<DateTimeOffset> OrderAttemptTimes => _orderAttemptTimes.ToArray();
 
@@ -409,6 +414,38 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
                 "urn:ietf:params:acme:error:invalidProfile",
                 $"Unknown profile '{profile}'.");
             return;
+        }
+
+        // RFC 9773 section 5 lets an authority refuse a replaces naming a certificate it cannot tie to
+        // this order. Boulder (orderMatchesReplacement) and Pebble both do, before the alreadyReplaced
+        // check: an unknown certificate is 404, one issued to another account is 403 unauthorized. The
+        // second is what a client meets after its email address or account key changed.
+        if (replaces is not null)
+        {
+            TestIssuedCertificate? replaced = _certificates.Values
+                .FirstOrDefault(c => ComputeCertificateId(c.Leaf) == replaces);
+
+            if (replaced is null)
+            {
+                Interlocked.Increment(ref _refusedReplaces);
+                await WriteProblemAsync(
+                    context,
+                    StatusCodes.Status404NotFound,
+                    "urn:ietf:params:acme:error:malformed",
+                    $"The order names '{replaces}' in replaces, but no such certificate exists.");
+                return;
+            }
+
+            if (!string.Equals(replaced.AccountId, account.Id, StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref _refusedReplaces);
+                await WriteProblemAsync(
+                    context,
+                    StatusCodes.Status403Forbidden,
+                    "urn:ietf:params:acme:error:unauthorized",
+                    "requester account did not request the certificate being replaced by this order");
+                return;
+            }
         }
 
         // RFC 9773 section 5: a certificate may be named by the replaces field of only one order that
@@ -777,6 +814,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
         var issued = new TestIssuedCertificate
         {
             Id = NewId(),
+            AccountId = order.AccountId,
             ChainPem = _issuer.BuildChainPem(leaf),
             AlternateChainPem = Behavior.OfferAlternateChain ? _issuer.BuildAlternateChainPem(leaf) : null,
             Leaf = leaf,

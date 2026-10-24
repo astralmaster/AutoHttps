@@ -23,8 +23,10 @@ public sealed class AutoHttpsOptions
     /// The stored ACME account is keyed by this address together with the authority, so changing it,
     /// including correcting a typo, makes the next issuance register a new account with a new key
     /// rather than reuse the existing one. The previous account and its rate-limit history are left in
-    /// place at the authority but no longer used, and its contact is not updated. Set the address once
-    /// and keep it stable; to move to a new one, expect a new account.
+    /// place at the authority but no longer used, and its contact is not updated. The first renewal
+    /// afterwards is ordered without the renewal hint, because the authority does not accept a renewal
+    /// of a certificate issued to the previous account. Set the address once and keep it stable. To move
+    /// to a new one, expect a new account.
     /// </remarks>
     public string? EmailAddress { get; set; }
 

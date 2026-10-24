@@ -249,4 +249,12 @@ internal static partial class Log
         int failures,
         DateTimeOffset notAfter,
         string reason);
+
+    [LoggerMessage(
+        EventId = 148,
+        Level = LogLevel.Information,
+        Message = "The certificate authority would not accept this order as a renewal of the certificate in use " +
+                  "({Detail}). Ordering again without the replaces hint. This is expected once after the email " +
+                  "address or the account key changed, because the certificate belongs to the previous account.")]
+    public static partial void RenewalNotAccepted(ILogger logger, string detail);
 }
