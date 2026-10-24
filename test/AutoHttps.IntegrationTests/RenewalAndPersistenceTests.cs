@@ -58,7 +58,11 @@ public class RenewalAndPersistenceTests
         string keyMaterial = await File.ReadAllTextAsync(accountKeys[0]);
 
         // Force a new order so the second process has to register before it can talk to the authority.
-        File.Delete(Directory.GetFiles(storage.Path, "*.crt.pem")[0]);
+        // The copy kept for a change of names goes too, or the second process would serve that instead.
+        foreach (string certificate in Directory.GetFiles(storage.Path, "*.crt.pem"))
+        {
+            File.Delete(certificate);
+        }
 
         await using TestApplication second = await TestApplication.StartAsync(authority, Configure(storage));
         await second.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
@@ -79,9 +83,16 @@ public class RenewalAndPersistenceTests
 
         // Publishing before persisting leaves a window where a restart loses the certificate and
         // orders another one, which is how an application walks into a duplicate-certificate limit.
-        Assert.Single(Directory.GetFiles(storage.Path, "*.crt.pem"));
-        Assert.Single(Directory.GetFiles(storage.Path, "*.key.pem"));
+        Assert.Single(Stored(storage, "*.crt.pem"));
+        Assert.Single(Stored(storage, "*.key.pem"));
     }
+
+    /// <summary>
+    /// The files filed under the configured names, leaving out the copy kept per authority for when
+    /// those names change.
+    /// </summary>
+    private static string[] Stored(TempStorage storage, string pattern) =>
+        [.. Directory.GetFiles(storage.Path, pattern).Where(path => !Path.GetFileName(path).StartsWith("latest-", StringComparison.Ordinal))];
 
     [Fact]
     public async Task ACertificateIsWrittenToTheStoreInAFormOpenSslWouldAccept()
@@ -92,8 +103,8 @@ public class RenewalAndPersistenceTests
 
         await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
 
-        string chain = await File.ReadAllTextAsync(Directory.GetFiles(storage.Path, "*.crt.pem").Single());
-        string key = await File.ReadAllTextAsync(Directory.GetFiles(storage.Path, "*.key.pem").Single());
+        string chain = await File.ReadAllTextAsync(Stored(storage, "*.crt.pem").Single());
+        string key = await File.ReadAllTextAsync(Stored(storage, "*.key.pem").Single());
 
         Assert.StartsWith("-----BEGIN CERTIFICATE-----", chain, StringComparison.Ordinal);
         Assert.Equal(2, chain.Split("-----BEGIN CERTIFICATE-----").Length - 1);

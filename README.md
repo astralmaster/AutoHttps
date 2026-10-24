@@ -228,6 +228,12 @@ been written, so a volume that fills up mid-write leaves the previous pair intac
 certificate with no key. Files are `0600` on Unix. Certificates for domains you stop using are not
 deleted; prune the directory yourself if that matters.
 
+Changing `DomainNames` does not take the names that stayed offline. AutoHttps keeps a copy of the most
+recent certificate from each authority (the `latest-` files), serves it for the names it still covers,
+and orders one for the new set straight away. A name that was added gets the self-signed fallback until
+that order succeeds, and the health check reports `Degraded` meanwhile. After a name is removed, the
+current certificate still covers the rest, so it is kept until its ordinary renewal.
+
 To store certificates elsewhere
 (a database, Key Vault, a Kubernetes secret), implement `ICertificateStore` and `IAccountKeyStore`:
 
@@ -601,6 +607,7 @@ exists for diagnosis, not alerting.
 | 134 | Warning | A `dns-01` record was not visible through `DnsPropagationResolver` before the timeout. Validation was requested anyway. |
 | 143 | Warning | The `http-01` challenge store could not be read, so this instance could not answer a validation. With a shared store, check that every replica reaches it. |
 | 144 | Warning | The diagnostics ran after a failed order and found something to look at. The report is in the message. See "Diagnosing a failure". |
+| 149 | Warning | Nothing is stored for the configured names yet, as after they change, so the previous certificate is served for the names it covers until one for every name is issued. The health check reports `Degraded` meanwhile. |
 | 122 | Error | Something unexpected went wrong, including a storage directory that cannot be written. The application keeps running. |
 | 147 | Error | Renewal is overdue: attempts keep failing and the certificate in use is near expiry, so it will not be replaced in time. Logged once per run of failures. See [When renewal keeps failing](#when-renewal-keeps-failing). |
 | 137 | Critical | No certificate was obtained within `StartupCertificateTimeout` and `RequireCertificateOnStartup` is set. The application is being stopped. |

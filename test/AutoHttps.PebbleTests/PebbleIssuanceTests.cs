@@ -304,7 +304,9 @@ public class PebbleIssuanceTests
         // The renewed certificate has to be the one on the wire, and it has to be on disk.
         Assert.True(await app.HandshakeIsTrustedAsync(domain, _pebble.PebbleRoot));
 
-        string storedChain = await File.ReadAllTextAsync(Directory.GetFiles(storage.Path, "*.crt.pem").Single());
+        // The copy kept per authority for a change of names is left out.
+        string storedChain = await File.ReadAllTextAsync(Directory.GetFiles(storage.Path, "*.crt.pem")
+            .Single(path => !Path.GetFileName(path).StartsWith("latest-", StringComparison.Ordinal)));
         using X509Certificate2 stored = X509Certificate2.CreateFromPem(storedChain);
 
         // The threshold above renews every few seconds, so naming one particular renewal here is a

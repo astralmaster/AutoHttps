@@ -25,6 +25,13 @@ internal static class StoreKey
     public static string ForAccount(Uri directoryUri, string contact) =>
         "account-" + Hash(directoryUri.AbsoluteUri + "|" + contact);
 
+    /// <summary>
+    /// Names the copy of the most recent certificate kept for each authority. A certificate is
+    /// otherwise filed under its exact name set, so changing the configured names leaves nothing to
+    /// serve, not even for the names that stayed, until a certificate for the new set is issued.
+    /// </summary>
+    public static string ForLatest(Uri directoryUri) => "latest-" + Hash(directoryUri.AbsoluteUri);
+
     private static string Hash(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..HashLength].ToLowerInvariant();
 

@@ -39,7 +39,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     private readonly ConcurrentDictionary<string, TestAuthorization> _authorizations = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TestChallenge> _challenges = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TestIssuedCertificate> _certificates = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, byte> _replacedCertificateIds = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _replacedCertificateIds = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _revoked = new(StringComparer.Ordinal);
 
     private int _requestCount;
@@ -451,7 +451,11 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
         // RFC 9773 section 5: a certificate may be named by the replaces field of only one order that
         // is not invalid. A second order naming the same certificate is refused with 409 alreadyReplaced,
         // which is the case a client that lost track of a renewal it already made has to recover from.
-        if (replaces is not null && !_replacedCertificateIds.TryAdd(replaces, 0))
+        // An order that went invalid releases the certificate, so a renewal that failed can be retried.
+        if (replaces is not null &&
+            _replacedCertificateIds.TryGetValue(replaces, out string? earlierOrderId) &&
+            _orders.TryGetValue(earlierOrderId, out TestOrder? earlierOrder) &&
+            RefreshAndReadStatus(earlierOrder) != "invalid")
         {
             await WriteProblemAsync(
                 context,
@@ -503,6 +507,11 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
 
         _orders[order.Id] = order;
         Interlocked.Increment(ref _orderCount);
+
+        if (replaces is not null)
+        {
+            _replacedCertificateIds[replaces] = order.Id;
+        }
 
         context.Response.Headers.Location = Url("order/" + order.Id);
         await WriteJsonAsync(context, StatusCodes.Status201Created, SerializeOrder(order));
@@ -628,7 +637,10 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
 
         challenge.Status = "processing";
         authorization.ValidationAttempted = true;
-        authorization.ValidationSucceeded = !Behavior.FailValidation && await ValidateAsync(account, authorization, challenge);
+        authorization.ValidationSucceeded =
+            !Behavior.FailValidation &&
+            !Behavior.UnreachableNames.ContainsKey(authorization.Identifier.Value) &&
+            await ValidateAsync(account, authorization, challenge);
 
         if (!authorization.ValidationSucceeded)
         {
@@ -699,6 +711,12 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
 
         RefreshOrderStatus(order);
         await WriteJsonAsync(context, StatusCodes.Status200OK, SerializeOrder(order));
+    }
+
+    private string RefreshAndReadStatus(TestOrder order)
+    {
+        RefreshOrderStatus(order);
+        return order.Status;
     }
 
     private void RefreshOrderStatus(TestOrder order)

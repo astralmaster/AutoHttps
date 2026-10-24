@@ -71,6 +71,20 @@ internal sealed class AutoHttpsHealthCheck : IHealthCheck
                 HealthStatus.Degraded, DescribeNearExpiry(snapshot), data: data));
         }
 
+        if (snapshot.UncoveredDomains.Count > 0)
+        {
+            // After the configured names changed, the previous certificate is kept for the names it
+            // covers. The others are served the fallback until a certificate for them is issued, which
+            // is the same state the missing-certificate report describes, so it is not reported healthy.
+            string uncovered = string.Join(", ", snapshot.UncoveredDomains);
+            data["uncovered_domains"] = uncovered;
+
+            return Task.FromResult(new HealthCheckResult(
+                HealthStatus.Degraded,
+                $"The certificate in use does not cover {uncovered} yet, because a certificate for every configured name has not been issued.",
+                data: data));
+        }
+
         return Task.FromResult(HealthCheckResult.Healthy("The managed certificate is valid.", data));
     }
 

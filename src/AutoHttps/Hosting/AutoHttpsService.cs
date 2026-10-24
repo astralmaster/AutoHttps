@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
@@ -38,6 +39,8 @@ internal sealed class AutoHttpsService : BackgroundService
     private readonly TaskCompletionSource _firstCertificate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private ServerCertificate? _current;
+    private IReadOnlyList<string> _domains = [];
+    private string _latestName = string.Empty;
     private DateTimeOffset _loggedRenewal;
     private DateTimeOffset _lastIssued;
     private TimeSpan _nextRetry;
@@ -88,6 +91,8 @@ internal sealed class AutoHttpsService : BackgroundService
         string storeName = StoreKey.ForCertificate(_options.CertificateAuthority, domains);
         string description = string.Join(", ", domains);
 
+        _domains = domains;
+        _latestName = StoreKey.ForLatest(_options.CertificateAuthority);
         _state.SetDomains(domains);
 
         if (_options.ServeFallbackCertificate)
@@ -103,7 +108,17 @@ internal sealed class AutoHttpsService : BackgroundService
 
         Log.ServiceStarting(_logger, description);
 
-        await AdoptFromStoreAsync(storeName, announce: false, stoppingToken);
+        if (await AdoptFromStoreAsync(storeName, announce: false, stoppingToken) is { } stored)
+        {
+            // Kept so a later change of the configured names still finds this certificate. Done here
+            // as well as after issuance so a store written before the copy existed gains one too.
+            await RememberAsLatestAsync(stored, compareFirst: true, stoppingToken);
+        }
+        else
+        {
+            await AdoptPreviousAsync(storeName, description, stoppingToken);
+        }
+
         await WaitForApplicationStartedAsync(stoppingToken);
 
         if (_options.RequireCertificateOnStartup && _current is null)
@@ -205,7 +220,7 @@ internal sealed class AutoHttpsService : BackgroundService
 
         await using (handle)
         {
-            if (await AdoptFromStoreAsync(storeName, announce: true, cancellationToken) && !IsDue(_current))
+            if (await AdoptFromStoreAsync(storeName, announce: true, cancellationToken) is not null && !IsDue(_current))
             {
                 return AcquisitionOutcome.Acquired;
             }
@@ -224,6 +239,7 @@ internal sealed class AutoHttpsService : BackgroundService
                 // back with nothing on disk and order all over again, which is the quickest way to
                 // run into a certificate authority's duplicate-certificate limit.
                 await SaveAsync(storeName, material, cancellationToken);
+                await RememberAsLatestAsync(material, compareFirst: false, cancellationToken);
 
                 Publish(certificate);
                 Log.CertificateIssued(_logger, description, certificate.NotAfter);
@@ -281,8 +297,10 @@ internal sealed class AutoHttpsService : BackgroundService
         CancellationToken cancellationToken)
     {
         ServerCertificate? current = _current;
-        if (current is null)
+        if (current is null || !CoversConfiguredNames(current))
         {
+            // A certificate that leaves out a configured name is only being served until one that
+            // covers them all is issued, so it is due now whatever its own schedule says.
             return (now, null);
         }
 
@@ -343,7 +361,7 @@ internal sealed class AutoHttpsService : BackgroundService
 
     private bool IsDue(ServerCertificate? certificate)
     {
-        if (certificate is null)
+        if (certificate is null || !CoversConfiguredNames(certificate))
         {
             return true;
         }
@@ -360,7 +378,8 @@ internal sealed class AutoHttpsService : BackgroundService
         return renewAt <= now;
     }
 
-    private async Task<bool> AdoptFromStoreAsync(string storeName, bool announce, CancellationToken cancellationToken)
+    /// <summary>Serves the certificate stored under this name, and returns what was stored if it was used.</summary>
+    private async Task<CertificateMaterial?> AdoptFromStoreAsync(string storeName, bool announce, CancellationToken cancellationToken)
     {
         CertificateMaterial? material;
         try
@@ -370,12 +389,12 @@ internal sealed class AutoHttpsService : BackgroundService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Log.StoreReadFailed(_logger, ex);
-            return false;
+            return null;
         }
 
         if (material is null)
         {
-            return false;
+            return null;
         }
 
         ServerCertificate candidate;
@@ -386,7 +405,7 @@ internal sealed class AutoHttpsService : BackgroundService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Log.StoreReadFailed(_logger, ex);
-            return false;
+            return null;
         }
 
         // Only expiry disqualifies a stored certificate. One whose validity has not started yet is
@@ -399,7 +418,7 @@ internal sealed class AutoHttpsService : BackgroundService
         if (!usable)
         {
             candidate.Dispose();
-            return false;
+            return null;
         }
 
         Publish(candidate);
@@ -417,7 +436,123 @@ internal sealed class AutoHttpsService : BackgroundService
             Log.CertificateLoaded(_logger, subjects, candidate.NotAfter);
         }
 
+        return material;
+    }
+
+    /// <summary>
+    /// When nothing is stored for the configured names, serves the most recent certificate from this
+    /// authority for the names it covers. That is the case right after the configured names changed:
+    /// without it every name, including the ones that stayed, would get the self-signed fallback until
+    /// a certificate for the new set is issued, which never happens while a new name cannot validate.
+    /// It is replaced at once, because <see cref="CoversConfiguredNames"/> makes it due.
+    /// </summary>
+    private async Task AdoptPreviousAsync(string storeName, string description, CancellationToken cancellationToken)
+    {
+        CertificateMaterial? material;
+        try
+        {
+            material = await _store.LoadAsync(_latestName, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.StoreReadFailed(_logger, ex);
+            return;
+        }
+
+        if (material is null)
+        {
+            return;
+        }
+
+        ServerCertificate candidate;
+        try
+        {
+            candidate = CertificateFactory.CreateFromPem(material.CertificateChainPem, material.PrivateKeyPem);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.StoreReadFailed(_logger, ex);
+            return;
+        }
+
+        string[] covered = [.. _domains.Where(domain => Names(candidate, domain))];
+
+        // A certificate for none of these names, for example another application's when several share
+        // the storage directory, is of no use here.
+        if (candidate.NotAfter <= _time.GetUtcNow() || covered.Length == 0)
+        {
+            candidate.Dispose();
+            return;
+        }
+
+        Publish(candidate);
+
+        if (covered.Length == _domains.Count)
+        {
+            // Every configured name is in it, as after a name was removed, so it is filed under the
+            // new set and kept until its ordinary renewal rather than replaced straight away.
+            await SaveAsync(storeName, material, cancellationToken);
+            string subjects = string.Join(", ", candidate.SubjectNames);
+            Log.CertificateLoaded(_logger, subjects, candidate.NotAfter);
+            return;
+        }
+
+        string coveredNames = string.Join(", ", covered);
+        Log.PreviousCertificateServed(_logger, description, coveredNames);
+    }
+
+    /// <summary>
+    /// Keeps a copy of the certificate in hand under a name that does not depend on the configured
+    /// names, which is what <see cref="AdoptPreviousAsync"/> reads after they change. Losing it only
+    /// loses that fallback, so a failure is logged and otherwise ignored.
+    /// </summary>
+    private async Task RememberAsLatestAsync(CertificateMaterial material, bool compareFirst, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (compareFirst &&
+                await _store.LoadAsync(_latestName, cancellationToken) is { } latest &&
+                string.Equals(latest.CertificateChainPem, material.CertificateChainPem, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            await _store.SaveAsync(_latestName, material, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.LatestCertificateNotRecorded(_logger, ex);
+        }
+    }
+
+    /// <summary>
+    /// Whether the certificate names every configured domain. The names have to appear as they were
+    /// configured: a wildcard that happens to match a configured name is not what was ordered for it.
+    /// </summary>
+    private bool CoversConfiguredNames(ServerCertificate certificate)
+    {
+        foreach (string domain in _domains)
+        {
+            if (!Names(certificate, domain))
+            {
+                return false;
+            }
+        }
+
         return true;
+    }
+
+    private static bool Names(ServerCertificate certificate, string domain)
+    {
+        foreach (string name in certificate.SubjectNames)
+        {
+            if (string.Equals(name, domain, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task SaveAsync(string storeName, CertificateMaterial material, CancellationToken cancellationToken)
@@ -443,17 +578,23 @@ internal sealed class AutoHttpsService : BackgroundService
             return;
         }
 
-        Publish(new ServerCertificate(leaf, new X509Certificate2Collection()));
+        Publish(new ServerCertificate(leaf, new X509Certificate2Collection()), development: true);
         Log.DevelopmentCertificateServed(_logger, _developmentCertificate.Description, description);
     }
 
-    private void Publish(ServerCertificate certificate)
+    private void Publish(ServerCertificate certificate, bool development = false)
     {
+        // A development certificate is served for whatever names it has, by design, so it is not
+        // reported as falling short of the configured ones.
+        IReadOnlyList<string> uncovered = development
+            ? []
+            : [.. _domains.Where(domain => !Names(certificate, domain))];
+
         // Update the read model before handing the certificate to the selector. The selector's
         // publish is a full barrier, so a reader that sees the new certificate there is guaranteed to
         // also see the matching state, never a certificate the inspector does not yet know about.
         _current = certificate;
-        _state.CertificatePublished(certificate);
+        _state.CertificatePublished(certificate, uncovered);
         _selector.Publish(certificate);
         _loggedRenewal = default;
         _firstCertificate.TrySetResult();

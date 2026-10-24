@@ -125,6 +125,32 @@ public class CertificateInspectorAndHealthTests
     }
 
     [Fact]
+    public async Task TheHealthCheckDegradesWhileTheCertificateInUseLeavesOutAConfiguredName()
+    {
+        // After the configured names change, the previous certificate is kept for the names it covers
+        // and the new ones get the fallback until a certificate for them arrives. That is not healthy,
+        // even though the certificate in use is valid and nowhere near expiry.
+        var time = new FakeTimeProvider(Now);
+        var state = new AutoHttpsState();
+        state.SetDomains(["app.example.com", "new.example.com"]);
+
+        using ServerCertificate certificate = SelfSigned("app.example.com", time, TimeSpan.FromDays(30));
+        state.CertificatePublished(certificate, ["new.example.com"]);
+
+        HealthCheckResult result = await RunAsync(Check(state, time));
+
+        Assert.Equal(HealthStatus.Degraded, result.Status);
+        Assert.Equal("new.example.com", result.Data["uncovered_domains"]);
+        Assert.Contains("new.example.com", result.Description, StringComparison.Ordinal);
+
+        // A certificate for the full set clears it.
+        using ServerCertificate full = SelfSigned("app.example.com", time, TimeSpan.FromDays(30));
+        state.CertificatePublished(full);
+
+        Assert.Equal(HealthStatus.Healthy, (await RunAsync(Check(state, time))).Status);
+    }
+
+    [Fact]
     public async Task TheHealthCheckReportsTheConfiguredStatusWhileNoCertificateExists()
     {
         var time = new FakeTimeProvider(Now);

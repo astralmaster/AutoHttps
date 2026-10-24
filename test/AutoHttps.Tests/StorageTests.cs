@@ -66,6 +66,25 @@ public class StoreKeyTests
         Assert.NotEqual(StoreKey.ForAccount(authority, "a@example.com"), StoreKey.ForAccount(authority, "b@example.com"));
         Assert.Equal(StoreKey.ForAccount(authority, "a@example.com"), StoreKey.ForAccount(authority, "a@example.com"));
     }
+
+    [Fact]
+    public void ForLatest_IsPerAuthorityAndCannotCollideWithACertificateName()
+    {
+        // The copy is read back after the configured names change, so it must not depend on them, and
+        // a staging copy must never be read back in production.
+        var staging = new Uri("https://acme-staging-v02.api.letsencrypt.org/directory");
+        var production = new Uri("https://acme-v02.api.letsencrypt.org/directory");
+
+        Assert.Equal(StoreKey.ForLatest(production), StoreKey.ForLatest(production));
+        Assert.NotEqual(StoreKey.ForLatest(staging), StoreKey.ForLatest(production));
+
+        // A certificate name starts with its first domain, and no domain has the "latest-" form with a
+        // hash after it, because a hash is not a valid top-level domain.
+        string latest = StoreKey.ForLatest(production);
+        Assert.StartsWith("latest-", latest, StringComparison.Ordinal);
+        Assert.NotEqual(latest, StoreKey.ForCertificate(production, ["latest"]));
+        Assert.Equal(-1, latest.IndexOfAny(Path.GetInvalidFileNameChars()));
+    }
 }
 
 public class FileSystemStoreTests : IDisposable

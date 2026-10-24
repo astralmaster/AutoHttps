@@ -257,4 +257,17 @@ internal static partial class Log
                   "({Detail}). Ordering again without the replaces hint. This is expected once after the email " +
                   "address or the account key changed, because the certificate belongs to the previous account.")]
     public static partial void RenewalNotAccepted(ILogger logger, string detail);
+
+    [LoggerMessage(
+        EventId = 149,
+        Level = LogLevel.Warning,
+        Message = "No certificate is stored for {Domains} yet, which is what happens after the configured names " +
+                  "change. Serving the previous certificate for {Covered} until one for every name is issued.")]
+    public static partial void PreviousCertificateServed(ILogger logger, string domains, string covered);
+
+    [LoggerMessage(
+        EventId = 150,
+        Level = LogLevel.Debug,
+        Message = "Could not keep a copy of the certificate for use after the configured names change.")]
+    public static partial void LatestCertificateNotRecorded(ILogger logger, Exception exception);
 }

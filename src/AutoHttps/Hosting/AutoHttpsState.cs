@@ -19,8 +19,17 @@ internal sealed class AutoHttpsState
     public void SetDomains(IReadOnlyList<string> domains) =>
         _snapshot = _snapshot with { Domains = domains };
 
-    public void CertificatePublished(ServerCertificate certificate) =>
-        _snapshot = _snapshot with { Certificate = CertificateInfo.From(certificate) };
+    /// <param name="certificate">The certificate now being served.</param>
+    /// <param name="uncoveredDomains">
+    /// Configured names it does not cover, which is only the case for a certificate kept in use after
+    /// the configured names changed, until one for the new set is issued.
+    /// </param>
+    public void CertificatePublished(ServerCertificate certificate, IReadOnlyList<string>? uncoveredDomains = null) =>
+        _snapshot = _snapshot with
+        {
+            Certificate = CertificateInfo.From(certificate),
+            UncoveredDomains = uncoveredDomains ?? [],
+        };
 
     public void RenewalScheduled(DateTimeOffset renewAt) =>
         _snapshot = _snapshot with { RenewalScheduledAt = renewAt };
@@ -47,9 +56,10 @@ internal sealed class AutoHttpsState
         DateTimeOffset? RenewalScheduledAt,
         DateTimeOffset? LastFailureAt,
         string? LastFailureReason,
-        int ConsecutiveFailures)
+        int ConsecutiveFailures,
+        IReadOnlyList<string> UncoveredDomains)
     {
-        public static readonly Snapshot Empty = new([], null, null, null, null, 0);
+        public static readonly Snapshot Empty = new([], null, null, null, null, 0, []);
     }
 }
 

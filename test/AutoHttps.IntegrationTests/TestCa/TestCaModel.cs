@@ -163,6 +163,10 @@ internal sealed class TestCaBehavior
 
     public bool FailValidation { get; set; }
 
+    /// <summary>Names whose validation fails while every other name validates, as a name whose DNS does
+    /// not point at the host yet would.</summary>
+    public ConcurrentDictionary<string, byte> UnreachableNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Registers the account and then fails the response, as a connection dropped after the
     /// authority had already committed the registration would.</summary>
     public int FailNextAccountResponsesCount { get; set; }
