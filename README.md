@@ -135,9 +135,9 @@ The quick start covers the common case. These are the rest:
 | `EmailAddress` | *(required)* | Contact registered with the authority. Changing it later registers a new account, and the next renewal is ordered without the renewal hint, because the authority does not accept a renewal of the previous account's certificate. |
 | `AcceptTermsOfService` | `false` | Must be `true`. Startup fails otherwise. |
 | `CertificateAuthority` | Let's Encrypt | The ACME directory URL. |
-| `Profile` | *(none)* | Certificate profile to request, e.g. `shortlived`. |
-| `KeyAlgorithm` | `EcdsaP256` | Key type for issued certificates. |
-| `PreferredChain` | *(none)* | Root common name the served chain should lead up to, when the authority offers more than one. |
+| `Profile` | *(none)* | Certificate profile to request, e.g. `shortlived`. A change applies from the next renewal. |
+| `KeyAlgorithm` | `EcdsaP256` | Key type for issued certificates. A change replaces the certificate in use straight away. |
+| `PreferredChain` | *(none)* | Root common name the served chain should lead up to, when the authority offers more than one. A change applies from the next renewal. |
 | `StorageDirectory` | local app data | Where certificates and the account key live. |
 | `ExternalAccountBinding` | *(none)* | Required by ZeroSSL and Google Trust Services. |
 | `DnsChallengeProvider` | *(none)* | Publishes TXT records for `dns-01`. |
@@ -591,6 +591,7 @@ exists for diagnosis, not alerting.
 | 138 | Information | A certificate was revoked at the authority. |
 | 145 | Information | The diagnostics ran after a failed order and found nothing wrong. See "Diagnosing a failure". |
 | 148 | Information | The authority would not accept the order as a renewal, usually because the certificate belongs to the account used before the email address or account key changed. It was ordered again without the renewal hint. |
+| 151 | Information | `KeyAlgorithm` changed, so the certificate in use is being replaced. It is served until the new one arrives. |
 | 110 | Warning | An order failed and will be retried. The reason is in the message; the stack trace is logged separately at Debug as event 124. |
 | 112 | Warning | A self-signed fallback is being served, logged once rather than per handshake. |
 | 114 | Warning | The store could not be read; continuing without a cached certificate. |

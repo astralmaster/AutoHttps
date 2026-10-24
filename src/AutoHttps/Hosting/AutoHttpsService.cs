@@ -41,6 +41,7 @@ internal sealed class AutoHttpsService : BackgroundService
     private ServerCertificate? _current;
     private IReadOnlyList<string> _domains = [];
     private string _latestName = string.Empty;
+    private string? _keyMismatchReported;
     private DateTimeOffset _loggedRenewal;
     private DateTimeOffset _lastIssued;
     private TimeSpan _nextRetry;
@@ -297,10 +298,11 @@ internal sealed class AutoHttpsService : BackgroundService
         CancellationToken cancellationToken)
     {
         ServerCertificate? current = _current;
-        if (current is null || !CoversConfiguredNames(current))
+        if (current is null || !MatchesConfiguration(current))
         {
-            // A certificate that leaves out a configured name is only being served until one that
-            // covers them all is issued, so it is due now whatever its own schedule says.
+            // A certificate that leaves out a configured name, or has a key of a different kind than
+            // configured, is only being served until one that matches is issued, so it is due now
+            // whatever its own schedule says.
             return (now, null);
         }
 
@@ -361,7 +363,7 @@ internal sealed class AutoHttpsService : BackgroundService
 
     private bool IsDue(ServerCertificate? certificate)
     {
-        if (certificate is null || !CoversConfiguredNames(certificate))
+        if (certificate is null || !MatchesConfiguration(certificate))
         {
             return true;
         }
@@ -523,6 +525,33 @@ internal sealed class AutoHttpsService : BackgroundService
         {
             Log.LatestCertificateNotRecorded(_logger, ex);
         }
+    }
+
+    /// <summary>
+    /// Whether the certificate is what the options would order now. One that is not is kept in use,
+    /// because it is still valid for the names it has, and replaced straight away rather than at its
+    /// ordinary renewal, which could be two months off.
+    /// </summary>
+    private bool MatchesConfiguration(ServerCertificate certificate)
+    {
+        if (!CoversConfiguredNames(certificate))
+        {
+            return false;
+        }
+
+        if (CertificateKey.Matches(certificate.Leaf, _options.KeyAlgorithm))
+        {
+            return true;
+        }
+
+        if (!string.Equals(_keyMismatchReported, certificate.Leaf.Thumbprint, StringComparison.Ordinal))
+        {
+            _keyMismatchReported = certificate.Leaf.Thumbprint;
+            string domains = string.Join(", ", _domains);
+            Log.KeyAlgorithmChanged(_logger, domains, _options.KeyAlgorithm);
+        }
+
+        return false;
     }
 
     /// <summary>

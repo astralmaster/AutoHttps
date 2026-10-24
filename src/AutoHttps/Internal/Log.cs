@@ -270,4 +270,11 @@ internal static partial class Log
         Level = LogLevel.Debug,
         Message = "Could not keep a copy of the certificate for use after the configured names change.")]
     public static partial void LatestCertificateNotRecorded(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        EventId = 151,
+        Level = LogLevel.Information,
+        Message = "The certificate for {Domains} has a different kind of key than KeyAlgorithm ({KeyAlgorithm}) now " +
+                  "asks for, so it is being replaced. It stays in use until the new one is issued.")]
+    public static partial void KeyAlgorithmChanged(ILogger logger, string domains, KeyAlgorithm keyAlgorithm);
 }

@@ -51,6 +51,36 @@ internal sealed class CertificateKey : IDisposable
         }
     }
 
+    /// <summary>Whether the certificate's public key is of the kind and size <paramref name="algorithm"/> creates.</summary>
+    public static bool Matches(X509Certificate2 certificate, KeyAlgorithm algorithm)
+    {
+        using ECDsa? ecdsa = certificate.GetECDsaPublicKey();
+        if (ecdsa is not null)
+        {
+            return algorithm switch
+            {
+                KeyAlgorithm.EcdsaP256 => ecdsa.KeySize == 256,
+                KeyAlgorithm.EcdsaP384 => ecdsa.KeySize == 384,
+                _ => false,
+            };
+        }
+
+        using RSA? rsa = certificate.GetRSAPublicKey();
+        if (rsa is not null)
+        {
+            return algorithm switch
+            {
+                KeyAlgorithm.Rsa2048 => rsa.KeySize == 2048,
+                KeyAlgorithm.Rsa3072 => rsa.KeySize == 3072,
+                KeyAlgorithm.Rsa4096 => rsa.KeySize == 4096,
+                _ => false,
+            };
+        }
+
+        // A key of some other kind was not ordered by this library, so there is nothing to compare.
+        return true;
+    }
+
     public string ExportPem() => _ecdsa is not null
         ? _ecdsa.ExportPkcs8PrivateKeyPem()
         : _rsa!.ExportPkcs8PrivateKeyPem();

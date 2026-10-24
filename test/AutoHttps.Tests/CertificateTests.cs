@@ -144,6 +144,34 @@ public class CertificateFactoryTests
     }
 }
 
+public class CertificateKeyMatchTests
+{
+    private static readonly KeyAlgorithm[] All = Enum.GetValues<KeyAlgorithm>();
+
+    public static TheoryData<KeyAlgorithm> Algorithms => new(All);
+
+    [Theory]
+    [MemberData(nameof(Algorithms))]
+    public void ACertificateMatchesOnlyTheAlgorithmItsKeyWasMadeWith(KeyAlgorithm algorithm)
+    {
+        // A false match leaves the old kind of key in use for months after KeyAlgorithm changed, and
+        // a false mismatch orders a new certificate on every start, so both directions matter.
+        using X509Certificate2 certificate = SelfSigned(algorithm);
+
+        foreach (KeyAlgorithm candidate in All)
+        {
+            Assert.Equal(candidate == algorithm, CertificateKey.Matches(certificate, candidate));
+        }
+    }
+
+    private static X509Certificate2 SelfSigned(KeyAlgorithm algorithm)
+    {
+        using var key = CertificateKey.Create(algorithm);
+        CertificateRequest request = key.CreateRequest(new X500DistinguishedName("CN=example.com"));
+        return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddDays(1));
+    }
+}
+
 public class AcmeCertificateIdTests
 {
     [Fact]

@@ -150,6 +150,32 @@ public sealed class DomainChangeTests
         Assert.Equal(2, authority.OrderCount);
     }
 
+    [Fact]
+    public async Task ChangingTheKeyAlgorithmReplacesTheCertificateStraightAway()
+    {
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        // A 90 day certificate that is nowhere near its renewal point, so only the key can make it due.
+        string original = await IssueAsync(authority, storage, "app.example.com");
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            Configure(storage, "app.example.com")(options);
+            options.KeyAlgorithm = KeyAlgorithm.Rsa2048;
+        });
+
+        ServerCertificate replaced = await app.WaitForCertificateChangeAsync("app.example.com", original, IssuanceTimeout);
+
+        Assert.Equal("1.2.840.113549.1.1.1", replaced.Leaf.PublicKey.Oid.Value);
+        Assert.Equal(1, app.Log.CountOf(151));
+        Assert.Equal(2, authority.OrderCount);
+
+        // And it settles: the new certificate matches, so nothing else is ordered.
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        Assert.Equal(2, authority.OrderCount);
+    }
+
     private static async Task<string> IssueAsync(TestCertificateAuthority authority, TempStorage storage, params string[] names)
     {
         await using TestApplication first = await TestApplication.StartAsync(authority, Configure(storage, names));
