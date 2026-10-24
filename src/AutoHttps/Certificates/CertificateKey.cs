@@ -85,8 +85,11 @@ internal sealed class CertificateKey : IDisposable
         ? _ecdsa.ExportPkcs8PrivateKeyPem()
         : _rsa!.ExportPkcs8PrivateKeyPem();
 
+    // A P-384 key is signed with SHA-384, the pairing the curve is meant for. AWS Certificate Manager
+    // refuses a P-384 request signed with SHA-256 ("EC P-384 key requires signing algorithm
+    // SHA384withECDSA"), and others accept either.
     public CertificateRequest CreateRequest(X500DistinguishedName subject) => _ecdsa is not null
-        ? new CertificateRequest(subject, _ecdsa, HashAlgorithmName.SHA256)
+        ? new CertificateRequest(subject, _ecdsa, _ecdsa.KeySize >= 384 ? HashAlgorithmName.SHA384 : HashAlgorithmName.SHA256)
         : new CertificateRequest(subject, _rsa!, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
 
     public void Dispose()

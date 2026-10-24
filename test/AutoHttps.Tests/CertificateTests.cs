@@ -144,6 +144,28 @@ public class CertificateFactoryTests
     }
 }
 
+public class SigningRequestAlgorithmTests
+{
+    [Theory]
+    [InlineData(KeyAlgorithm.EcdsaP256, "1.2.840.10045.4.3.2")] // ecdsa-with-SHA256
+    [InlineData(KeyAlgorithm.EcdsaP384, "1.2.840.10045.4.3.3")] // ecdsa-with-SHA384
+    [InlineData(KeyAlgorithm.Rsa2048, "1.2.840.113549.1.1.11")] // sha256WithRSAEncryption
+    public void EachKeyIsSignedWithTheHashItIsPairedWith(KeyAlgorithm algorithm, string expectedOid)
+    {
+        // AWS Certificate Manager refuses a P-384 request signed with SHA-256, so the pairing decides
+        // whether that authority will issue at all.
+        using var key = CertificateKey.Create(algorithm);
+        byte[] csr = CertificateFactory.CreateSigningRequest(["example.com"], key);
+
+        var reader = new System.Formats.Asn1.AsnReader(csr, System.Formats.Asn1.AsnEncodingRules.DER);
+        System.Formats.Asn1.AsnReader request = reader.ReadSequence();
+        request.ReadEncodedValue();
+        System.Formats.Asn1.AsnReader signatureAlgorithm = request.ReadSequence();
+
+        Assert.Equal(expectedOid, signatureAlgorithm.ReadObjectIdentifier());
+    }
+}
+
 public class CertificateKeyMatchTests
 {
     private static readonly KeyAlgorithm[] All = Enum.GetValues<KeyAlgorithm>();

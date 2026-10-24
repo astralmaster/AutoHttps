@@ -429,6 +429,28 @@ public class PebbleIssuanceTests
     }
 
     [Fact]
+    public async Task IssuesAP384CertificateFromARequestSignedWithSha384()
+    {
+        // The request for a P-384 key is signed with SHA-384, which some authorities require, and a real
+        // one has to accept it and issue for that key.
+        using var storage = new TempStorage();
+        string domain = NewDomain();
+
+        await using PebbleApplication app = await PebbleApplication.StartAsync(_pebble, options =>
+        {
+            options.DomainNames.Add(domain);
+            options.KeyAlgorithm = KeyAlgorithm.EcdsaP384;
+            options.StorageDirectory = storage.Path;
+        });
+
+        ServerCertificate certificate = await app.WaitForCertificateAsync(domain, Timeout);
+
+        using System.Security.Cryptography.ECDsa? key = certificate.Leaf.GetECDsaPublicKey();
+        Assert.Equal(384, key?.KeySize);
+        Assert.True(await app.HandshakeIsTrustedAsync(domain, _pebble.PebbleRoot));
+    }
+
+    [Fact]
     public async Task HonoursThePreferredChainWhenTheAuthorityOffersAlternateRoots()
     {
         using var storage = new TempStorage();
