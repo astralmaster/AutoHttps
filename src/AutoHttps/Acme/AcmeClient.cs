@@ -35,6 +35,9 @@ internal sealed class AcmeClient
 
     public string KeyId => _keyId ?? throw new InvalidOperationException("The ACME account has not been registered yet.");
 
+    /// <summary>The account URL once the account is registered or found, otherwise null.</summary>
+    public string? AccountUrl => _keyId;
+
     public Task<AcmeDirectory> GetDirectoryAsync(CancellationToken cancellationToken) =>
         _http.GetDirectoryAsync(cancellationToken);
 

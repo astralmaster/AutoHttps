@@ -90,6 +90,12 @@ internal sealed class AcmeSession : IDisposable
     /// </summary>
     public void InvalidateAccount() => Volatile.Write(ref _registered, false);
 
+    /// <summary>
+    /// The URL of the account in use, once one has been registered or found. A CAA accounturi has to
+    /// name it exactly.
+    /// </summary>
+    public string? AccountUrl => Volatile.Read(ref _registered) ? Volatile.Read(ref _client)?.AccountUrl : null;
+
     public void Dispose()
     {
         _gate.Dispose();

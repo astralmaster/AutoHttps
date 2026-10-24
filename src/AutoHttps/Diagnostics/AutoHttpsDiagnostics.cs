@@ -34,6 +34,7 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
     private readonly ICertificateStore _certificates;
     private readonly IEnumerable<IServer> _servers;
     private readonly TimeProvider _time;
+    private readonly Func<string?> _accountUrl;
 
     public AutoHttpsDiagnostics(
         IOptions<AutoHttpsOptions> options,
@@ -42,7 +43,21 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
         IHttp01ChallengeStore challenges,
         ICertificateStore certificates,
         IEnumerable<IServer> servers,
-        TimeProvider time)
+        TimeProvider time,
+        Hosting.AcmeSession? session = null)
+        : this(options, httpClientFactory, dns, challenges, certificates, servers, time, () => session?.AccountUrl)
+    {
+    }
+
+    internal AutoHttpsDiagnostics(
+        IOptions<AutoHttpsOptions> options,
+        IHttpClientFactory httpClientFactory,
+        DnsLookup dns,
+        IHttp01ChallengeStore challenges,
+        ICertificateStore certificates,
+        IEnumerable<IServer> servers,
+        TimeProvider time,
+        Func<string?> accountUrl)
     {
         _options = options.Value;
         _httpClientFactory = httpClientFactory;
@@ -51,6 +66,7 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
         _certificates = certificates;
         _servers = servers;
         _time = time;
+        _accountUrl = accountUrl;
     }
 
     public async Task<AutoHttpsDiagnosticsReport> RunAsync(CancellationToken cancellationToken = default)
@@ -481,6 +497,8 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
             return;
         }
 
+        string? accountUrl = _accountUrl();
+
         foreach (string domain in domains)
         {
             if (IPAddress.TryParse(domain, out _))
@@ -491,7 +509,11 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
             bool wildcard = domain.StartsWith("*.", StringComparison.Ordinal);
             string name = wildcard ? domain[2..] : domain;
 
-            checks.Add(await CheckOneCaaAsync(resolver, name, wildcard, identities, cancellationToken));
+            // The method the authority will check a validationmethods parameter against: a wildcard can
+            // only be validated by dns-01, and every other name by the preferred challenge.
+            string method = wildcard ? ChallengeTypes.Dns01 : _options.PreferredChallengeType;
+
+            checks.Add(await CheckOneCaaAsync(resolver, name, wildcard, method, accountUrl, identities, cancellationToken));
         }
     }
 
@@ -499,10 +521,13 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
         Uri resolver,
         string name,
         bool wildcard,
+        string method,
+        string? accountUrl,
         IReadOnlyList<string> identities,
         CancellationToken cancellationToken)
     {
         string check = "caa:" + name;
+        string authority = string.Join(" or ", identities);
 
         // RFC 8659 section 3: the closest ancestor with a CAA record set owns the policy, so the tree is
         // climbed until one is found. Stopping above the last two labels avoids asking about a TLD.
@@ -514,26 +539,63 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
                 return new AutoHttpsCheck(check, AutoHttpsCheckOutcome.Warning, $"'{resolver}' could not be reached or did not answer in the DNS JSON format");
             }
 
+            // An authority treats a CAA lookup it cannot complete as a refusal (RFC 8659 section 3), so
+            // this is not the same as finding no records and climbing on.
+            if (records.Status == DnsLookup.ServerFailure)
+            {
+                return new AutoHttpsCheck(
+                    check,
+                    AutoHttpsCheckOutcome.Failed,
+                    $"the resolver answered SERVFAIL for the CAA records on '{candidate}', and an authority that " +
+                    "cannot complete the CAA lookup refuses to issue",
+                    "some DNS providers fail queries for record types they do not support, and a broken DNSSEC " +
+                    "chain fails them all. Check the name on dnsviz.net and ask the provider to answer CAA queries");
+            }
+
             if (records.Records.Count == 0)
             {
                 continue;
             }
 
-            CaaVerdict verdict = CaaPolicy.Evaluate(records.Records, identities, wildcard);
+            CaaVerdict verdict = CaaPolicy.Evaluate(records.Records, identities, wildcard, method, accountUrl);
+            string found = string.Join("; ", records.Records);
 
             return verdict switch
             {
                 CaaVerdict.Permitted => new AutoHttpsCheck(
                     check,
                     AutoHttpsCheckOutcome.Passed,
-                    $"the CAA records on '{candidate}' permit {string.Join(" or ", identities)}"),
+                    $"the CAA records on '{candidate}' permit {authority}"),
                 CaaVerdict.Forbidden => new AutoHttpsCheck(
                     check,
                     AutoHttpsCheckOutcome.Failed,
-                    $"the CAA records on '{candidate}' do not permit {string.Join(" or ", identities)}: " +
-                    string.Join("; ", records.Records),
+                    $"the CAA records on '{candidate}' do not permit {authority}: {found}",
                     $"add a CAA record permitting this authority, for example '0 issue \"{identities[0]}\"', or " +
                     "remove the ones that exclude it"),
+                CaaVerdict.ForbiddenMethod => new AutoHttpsCheck(
+                    check,
+                    AutoHttpsCheckOutcome.Failed,
+                    $"the CAA records on '{candidate}' permit {authority} only through validation methods that leave out " +
+                    $"{method}, which is how this name is validated: {found}",
+                    $"add {method} to the record's validationmethods, or change PreferredChallengeType to a method it lists"),
+                CaaVerdict.ForbiddenAccount => new AutoHttpsCheck(
+                    check,
+                    AutoHttpsCheckOutcome.Failed,
+                    $"the CAA records on '{candidate}' permit {authority} only for another ACME account (accounturi): {found}",
+                    $"set accounturi to {accountUrl}, the account this application uses, or add a record for it. The " +
+                    "account changes with EmailAddress or a new account key"),
+                CaaVerdict.UnverifiedAccount => new AutoHttpsCheck(
+                    check,
+                    AutoHttpsCheckOutcome.Warning,
+                    $"the CAA records on '{candidate}' permit {authority} only for the ACME account they name (accounturi), " +
+                    $"and this application has not registered or looked up its account yet, so it cannot tell whether that is this one: {found}",
+                    "make sure accounturi names this application's account URL, which is logged at Debug once it is known"),
+                CaaVerdict.UnknownCritical => new AutoHttpsCheck(
+                    check,
+                    AutoHttpsCheckOutcome.Warning,
+                    $"the CAA records on '{candidate}' carry a property marked critical that this check does not know, and " +
+                    $"an authority that does not understand it must refuse to issue: {found}",
+                    "clear the critical flag (128) on that record unless every authority you use understands it"),
                 _ => new AutoHttpsCheck(
                     check,
                     AutoHttpsCheckOutcome.Passed,

@@ -45,7 +45,58 @@ public class CaaPolicyTests
             CaaPolicy.Evaluate(
                 ["0 issue \"letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/1\""],
                 LetsEncrypt,
-                wildcard: false));
+                wildcard: false,
+                accountUri: "https://acme-v02.api.letsencrypt.org/acme/acct/1"));
+
+    // RFC 8657. Let's Encrypt enforces both parameters today, and CA/Browser Forum ballot SC-098v2 makes
+    // every public authority do so from 2027-03-15, so passing either here would point the diagnosis
+    // away from the actual cause of a refused order.
+
+    [Theory]
+    [InlineData("http-01", false)]
+    [InlineData("dns-01", true)]
+    public void AValidationMethodsListDecidesByTheMethodInUse(string method, bool permitted) =>
+        Assert.Equal(
+            permitted ? CaaVerdict.Permitted : CaaVerdict.ForbiddenMethod,
+            CaaPolicy.Evaluate(["0 issue \"letsencrypt.org; validationmethods=dns-01,tls-alpn-01\""], LetsEncrypt, wildcard: false, method));
+
+    [Fact]
+    public void AnAccountUriForAnotherAccountForbidsIt() =>
+        Assert.Equal(
+            CaaVerdict.ForbiddenAccount,
+            CaaPolicy.Evaluate(
+                ["0 issue \"letsencrypt.org; accounturi=https://acme.example/acct/1\""],
+                LetsEncrypt,
+                wildcard: false,
+                accountUri: "https://acme.example/acct/2"));
+
+    [Fact]
+    public void AnAccountUriThatCannotBeComparedYetIsReportedAsUnverified() =>
+        Assert.Equal(
+            CaaVerdict.UnverifiedAccount,
+            CaaPolicy.Evaluate(["0 issue \"letsencrypt.org; accounturi=https://acme.example/acct/1\""], LetsEncrypt, wildcard: false));
+
+    [Fact]
+    public void ARecordWithoutParametersPermitsAlongsideOnePinnedToAnotherAccount() =>
+        Assert.Equal(
+            CaaVerdict.Permitted,
+            CaaPolicy.Evaluate(
+                ["0 issue \"letsencrypt.org; accounturi=https://acme.example/acct/1\"", "0 issue \"letsencrypt.org\""],
+                LetsEncrypt,
+                wildcard: false,
+                accountUri: "https://acme.example/acct/2"));
+
+    [Fact]
+    public void AnUnknownPropertyMarkedCriticalRefusesWhateverElseIsThere() =>
+        Assert.Equal(
+            CaaVerdict.UnknownCritical,
+            CaaPolicy.Evaluate(["128 tbs \"unknown\"", "0 issue \"letsencrypt.org\""], LetsEncrypt, wildcard: false));
+
+    [Fact]
+    public void AKnownPropertyMarkedCriticalIsFine() =>
+        Assert.Equal(
+            CaaVerdict.Permitted,
+            CaaPolicy.Evaluate(["128 iodef \"mailto:a@b\"", "0 issue \"letsencrypt.org\""], LetsEncrypt, wildcard: false));
 
     [Fact]
     public void TheDomainIsMatchedWithoutRegardToCase() =>

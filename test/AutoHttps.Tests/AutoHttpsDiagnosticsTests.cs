@@ -500,6 +500,60 @@ public class AutoHttpsDiagnosticsTests
     }
 
     [Fact]
+    public async Task AFailedCaaLookupIsAFailureRatherThanNoRecords()
+    {
+        // Climbing past it would report "no CAA records", but an authority refuses when it cannot
+        // complete the lookup, and some DNS providers fail queries for record types they do not know.
+        var routes = new Routes
+        {
+            Dns = (name, type) => type == DnsRecordType.Caa
+                ? (DnsLookup.ServerFailure, [], false)
+                : DefaultDns(name, type),
+        };
+
+        AutoHttpsCheck check = Find(await RunAsync(routes), "caa:app.example.com");
+
+        Assert.Equal(AutoHttpsCheckOutcome.Failed, check.Outcome);
+        Assert.Contains("SERVFAIL", check.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ACaaRecordPinnedToAnotherAccountNamesTheAccountInUse()
+    {
+        // After the email address or the account key changes, a record pinned with accounturi still
+        // names the old account, and the authority refuses every order from the new one.
+        var routes = new Routes
+        {
+            Dns = (name, type) => type == DnsRecordType.Caa && name == "app.example.com"
+                ? (DnsLookup.NoError, ["0 issue \"letsencrypt.org; accounturi=https://acme.example.com/acct/1\""], false)
+                : DefaultDns(name, type),
+        };
+
+        AutoHttpsCheck check = Find(
+            await RunAsync(routes, accountUrl: "https://acme.example.com/acct/2"),
+            "caa:app.example.com");
+
+        Assert.Equal(AutoHttpsCheckOutcome.Failed, check.Outcome);
+        Assert.Contains("https://acme.example.com/acct/2", check.Remedy!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ACaaRecordRestrictedToDns01FailsAnHttp01Name()
+    {
+        var routes = new Routes
+        {
+            Dns = (name, type) => type == DnsRecordType.Caa && name == "app.example.com"
+                ? (DnsLookup.NoError, ["0 issue \"letsencrypt.org; validationmethods=dns-01\""], false)
+                : DefaultDns(name, type),
+        };
+
+        AutoHttpsCheck check = Find(await RunAsync(routes), "caa:app.example.com");
+
+        Assert.Equal(AutoHttpsCheckOutcome.Failed, check.Outcome);
+        Assert.Contains("http-01", check.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AnAuthorityThatPublishesNoIdentitiesSkipsTheCaaCheck()
     {
         var routes = new Routes
@@ -692,7 +746,8 @@ public class AutoHttpsDiagnosticsTests
         IHttp01ChallengeStore? challenges = null,
         ICertificateStore? certificates = null,
         IServer? server = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        string? accountUrl = null)
     {
         var options = new AutoHttpsOptions
         {
@@ -713,7 +768,8 @@ public class AutoHttpsDiagnosticsTests
             challenges ?? new InMemoryHttp01ChallengeStore(),
             certificates ?? new InMemoryStore(),
             server is null ? [] : [server],
-            time ?? TimeProvider.System);
+            time ?? TimeProvider.System,
+            () => accountUrl);
 
         return diagnostics.RunAsync(CancellationToken.None);
     }
