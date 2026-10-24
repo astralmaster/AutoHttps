@@ -576,6 +576,12 @@ its polling the same way: while an order or authorization is still validating, i
 `Retry-After` on the poll asks for rather than checking on a fixed schedule. The application keeps
 serving whatever certificate it already holds.
 
+An account the authority no longer knows is registered again with the same key (event 125). A
+deactivated account is different: the authority refuses its key from then on, registration included,
+so every attempt fails with the authority's reason (event 110). AutoHttps does not quietly create a new
+account in its place. Remove the stored account key, the `.account.pem` file or your store's entry, to
+register one.
+
 Log categories all begin with `AutoHttps` and event IDs are stable, so they are safe to alert on.
 Every event at `Information` and above is listed here; anything not in this table is `Debug` and
 exists for diagnosis, not alerting.

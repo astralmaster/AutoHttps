@@ -15,6 +15,8 @@ internal sealed class TestAccount
     public required string Thumbprint { get; init; }
 
     public List<string> Contacts { get; } = [];
+
+    public bool Deactivated { get; set; }
 }
 
 internal sealed class TestOrder
@@ -199,8 +201,13 @@ internal sealed class TestCaBehavior
     /// <summary>Issues certificates whose validity starts in the future, as a skewed authority clock would.</summary>
     public TimeSpan NotBeforeSkew { get; set; }
 
-    /// <summary>Forgets every account once this many orders have been placed, as a deactivated account would look.</summary>
+    /// <summary>Forgets every account once this many orders have been placed, as an authority that lost
+    /// its data, or one whose endpoint moved, would look.</summary>
     public int ForgetAccountsAfterOrders { get; set; } = int.MaxValue;
+
+    /// <summary>Deactivates every account once this many orders have been placed. As at Boulder and
+    /// Pebble, a deactivated account's key is refused with unauthorized, including by newAccount.</summary>
+    public int DeactivateAccountsAfterOrders { get; set; } = int.MaxValue;
 
     /// <summary>Replies with an HTML error page, as an intercepting proxy or captive portal would.</summary>
     public int ReturnHtmlForNextRequests { get; set; }

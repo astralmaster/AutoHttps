@@ -258,6 +258,16 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
 
             if (_accounts.Values.FirstOrDefault(a => a.Thumbprint == key) is { } found)
             {
+                if (found.Deactivated)
+                {
+                    await WriteProblemAsync(
+                        context,
+                        StatusCodes.Status403Forbidden,
+                        "urn:ietf:params:acme:error:unauthorized",
+                        "An account with the provided public key exists but is deactivated.");
+                    return;
+                }
+
                 context.Response.Headers.Location = Url("account/" + found.Id);
                 await WriteJsonAsync(context, StatusCodes.Status200OK, SerializeAccount(found));
                 return;
@@ -291,6 +301,18 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
 
         if (existing is not null)
         {
+            // RFC 8555 section 7.3.6: the authority accepts nothing more for a deactivated account's key,
+            // a fresh registration included.
+            if (existing.Deactivated)
+            {
+                await WriteProblemAsync(
+                    context,
+                    StatusCodes.Status403Forbidden,
+                    "urn:ietf:params:acme:error:unauthorized",
+                    "An account with the provided public key exists but is deactivated.");
+                return;
+            }
+
             context.Response.Headers.Location = Url("account/" + existing.Id);
             await WriteJsonAsync(context, StatusCodes.Status200OK, SerializeAccount(existing));
             return;
@@ -374,10 +396,20 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
 
         if (Volatile.Read(ref _orderCount) >= Behavior.ForgetAccountsAfterOrders)
         {
-            // Forgetting once models an account being deactivated or lost. The authority still
-            // accepts a fresh registration afterwards, which is what the client has to do.
+            // Forgetting once models an authority that lost the registration or an endpoint that moved.
+            // The authority still accepts a fresh registration afterwards, which is what the client has
+            // to do.
             Behavior.ForgetAccountsAfterOrders = int.MaxValue;
             _accounts.Clear();
+        }
+
+        if (Volatile.Read(ref _orderCount) >= Behavior.DeactivateAccountsAfterOrders)
+        {
+            Behavior.DeactivateAccountsAfterOrders = int.MaxValue;
+            foreach (TestAccount existing in _accounts.Values)
+            {
+                existing.Deactivated = true;
+            }
         }
 
         Interlocked.Increment(ref _orderAttempts);
@@ -1129,9 +1161,14 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
         }
 
         string id = request.KeyId[(request.KeyId.LastIndexOf('/') + 1)..];
-        return _accounts.TryGetValue(id, out TestAccount? account)
-            ? account
-            : throw new JwsVerificationException("Unknown account.", "urn:ietf:params:acme:error:accountDoesNotExist");
+        if (!_accounts.TryGetValue(id, out TestAccount? account))
+        {
+            throw new JwsVerificationException("Unknown account.", "urn:ietf:params:acme:error:accountDoesNotExist");
+        }
+
+        return account.Deactivated
+            ? throw new JwsVerificationException("Account is not valid, has status \"deactivated\".", "urn:ietf:params:acme:error:unauthorized")
+            : account;
     }
 
     private byte[] SerializeAccount(TestAccount account)

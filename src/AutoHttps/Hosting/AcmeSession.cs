@@ -82,8 +82,11 @@ internal sealed class AcmeSession : IDisposable
 
     /// <summary>
     /// Forgets that the account was registered, so the next request registers again with the same
-    /// key. Used when the authority stops recognising the account, which happens if it was
-    /// deactivated, if the endpoint moved, or if the authority lost the registration.
+    /// key. Used when the authority stops recognising the account (accountDoesNotExist), which happens
+    /// if the endpoint moved or the authority lost the registration. A deactivated account is not that
+    /// case: the authority answers unauthorized for its key and refuses to register it again, so it is
+    /// reported as a failed order with the authority's reason, and only removing the stored key gets a
+    /// new account.
     /// </summary>
     public void InvalidateAccount() => Volatile.Write(ref _registered, false);
 

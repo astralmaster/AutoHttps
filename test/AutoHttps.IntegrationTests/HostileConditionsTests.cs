@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using AutoHttps.Certificates;
 using AutoHttps.IntegrationTests.TestCa;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace AutoHttps.IntegrationTests;
@@ -69,8 +70,8 @@ public class HostileConditionsTests
         using var storage = new TempStorage();
         await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
 
-        // After the first order the authority no longer knows the account, which is what a
-        // deactivated account, a migrated endpoint, or an authority that lost data looks like.
+        // After the first order the authority no longer knows the account, which is what a migrated
+        // endpoint, or an authority that lost data, looks like.
         authority.Behavior.ForgetAccountsAfterOrders = 1;
         authority.Behavior.AdvertiseRenewalInfo = false;
         authority.Behavior.CertificateLifetime = TimeSpan.FromSeconds(40);
@@ -88,6 +89,40 @@ public class HostileConditionsTests
             "app.example.com", first.Leaf.Thumbprint, TimeSpan.FromSeconds(45));
 
         Assert.NotEqual(first.Leaf.Thumbprint, renewed.Leaf.Thumbprint);
+    }
+
+    [Fact]
+    public async Task ADeactivatedAccountIsReportedRatherThanReplacedBehindTheOperatorsBack()
+    {
+        // Deactivation is something the operator or the authority chose, and the authority refuses the
+        // key from then on, registration included. Quietly creating a new account would undo that
+        // choice, so the refusal is reported on every attempt with the authority's own words.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        authority.Behavior.DeactivateAccountsAfterOrders = 1;
+        authority.Behavior.AdvertiseRenewalInfo = false;
+        authority.Behavior.CertificateLifetime = TimeSpan.FromSeconds(40);
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            Configure(storage)(options);
+            options.RenewalCheckInterval = TimeSpan.FromSeconds(1);
+            options.RenewalThreshold = 0.9;
+        });
+
+        await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (app.Log.CountOf(110) < 2 && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(100);
+        }
+
+        AutoHttpsCertificateStatus status = app.Services.GetRequiredService<IAutoHttpsCertificateInspector>().GetStatus();
+
+        Assert.True(app.Log.CountOf(110) >= 2, app.Log.Describe());
+        Assert.Contains("deactivated", status.LastFailureReason, StringComparison.Ordinal);
+        Assert.Equal(1, authority.AccountCount);
     }
 
     [Fact]
