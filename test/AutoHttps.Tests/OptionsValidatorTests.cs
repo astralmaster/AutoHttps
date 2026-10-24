@@ -289,6 +289,57 @@ public class OptionsValidatorTests
         Assert.True(_validator.Validate(null, options).Succeeded);
     }
 
+    public static TheoryData<string> Durations => new()
+    {
+        nameof(AutoHttpsOptions.RenewalCheckInterval),
+        nameof(AutoHttpsOptions.ValidationTimeout),
+        nameof(AutoHttpsOptions.PollInterval),
+        nameof(AutoHttpsOptions.InitialRetryDelay),
+        nameof(AutoHttpsOptions.MaxRetryDelay),
+        nameof(AutoHttpsOptions.DnsPropagationDelay),
+        nameof(AutoHttpsOptions.DnsPropagationTimeout),
+        nameof(AutoHttpsOptions.StartupCertificateTimeout),
+    };
+
+    [Theory]
+    [MemberData(nameof(Durations))]
+    public void ADurationTooLongToWaitForIsRejectedAtStartup(string name)
+    {
+        // A wait over about 49.7 days throws inside the timer, and TimeSpan.MaxValue overflows a
+        // deadline. Accepting either here would only move the failure into the renewal loop.
+        AutoHttpsOptions options = Valid();
+        Set(options, name, TimeSpan.MaxValue);
+
+        AssertFails(options, name + " must be at most 30 days");
+    }
+
+    [Theory]
+    [MemberData(nameof(Durations))]
+    public void ADurationAtTheLimitIsAccepted(string name)
+    {
+        AutoHttpsOptions options = Valid();
+        options.MaxRetryDelay = AutoHttpsOptionsValidator.MaxDuration;
+        Set(options, name, AutoHttpsOptionsValidator.MaxDuration);
+
+        Assert.True(_validator.Validate(null, options).Succeeded);
+    }
+
+    private static void Set(AutoHttpsOptions options, string name, TimeSpan value)
+    {
+        switch (name)
+        {
+            case nameof(AutoHttpsOptions.RenewalCheckInterval): options.RenewalCheckInterval = value; break;
+            case nameof(AutoHttpsOptions.ValidationTimeout): options.ValidationTimeout = value; break;
+            case nameof(AutoHttpsOptions.PollInterval): options.PollInterval = value; break;
+            case nameof(AutoHttpsOptions.InitialRetryDelay): options.InitialRetryDelay = value; break;
+            case nameof(AutoHttpsOptions.MaxRetryDelay): options.MaxRetryDelay = value; break;
+            case nameof(AutoHttpsOptions.DnsPropagationDelay): options.DnsPropagationDelay = value; break;
+            case nameof(AutoHttpsOptions.DnsPropagationTimeout): options.DnsPropagationTimeout = value; break;
+            case nameof(AutoHttpsOptions.StartupCertificateTimeout): options.StartupCertificateTimeout = value; break;
+            default: throw new ArgumentOutOfRangeException(nameof(name), name, "Not a duration option.");
+        }
+    }
+
     [Fact]
     public void EveryProblemIsReportedAtOnce()
     {

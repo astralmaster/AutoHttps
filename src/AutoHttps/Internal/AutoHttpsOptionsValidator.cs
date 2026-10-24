@@ -9,6 +9,8 @@ namespace AutoHttps.Internal;
 
 internal sealed class AutoHttpsOptionsValidator : IValidateOptions<AutoHttpsOptions>
 {
+    internal static readonly TimeSpan MaxDuration = TimeSpan.FromDays(30);
+
     private readonly IServiceProviderIsService? _registrations;
 
     public AutoHttpsOptionsValidator()
@@ -124,6 +126,18 @@ internal sealed class AutoHttpsOptionsValidator : IValidateOptions<AutoHttpsOpti
         RequirePositive(failures, options.InitialRetryDelay, nameof(AutoHttpsOptions.InitialRetryDelay));
         RequirePositive(failures, options.MaxRetryDelay, nameof(AutoHttpsOptions.MaxRetryDelay));
 
+        // Every one of these becomes a wait or a deadline. A wait longer than about 49.7 days makes the
+        // timer underneath throw, and a value as large as TimeSpan.MaxValue overflows the deadline, so a
+        // setting that validated would only fail later, inside the renewal loop.
+        RequireAtMost(failures, options.RenewalCheckInterval, nameof(AutoHttpsOptions.RenewalCheckInterval));
+        RequireAtMost(failures, options.ValidationTimeout, nameof(AutoHttpsOptions.ValidationTimeout));
+        RequireAtMost(failures, options.PollInterval, nameof(AutoHttpsOptions.PollInterval));
+        RequireAtMost(failures, options.InitialRetryDelay, nameof(AutoHttpsOptions.InitialRetryDelay));
+        RequireAtMost(failures, options.MaxRetryDelay, nameof(AutoHttpsOptions.MaxRetryDelay));
+        RequireAtMost(failures, options.DnsPropagationDelay, nameof(AutoHttpsOptions.DnsPropagationDelay));
+        RequireAtMost(failures, options.DnsPropagationTimeout, nameof(AutoHttpsOptions.DnsPropagationTimeout));
+        RequireAtMost(failures, options.StartupCertificateTimeout, nameof(AutoHttpsOptions.StartupCertificateTimeout));
+
         if (options.DnsPropagationDelay < TimeSpan.Zero)
         {
             failures.Add($"{nameof(AutoHttpsOptions.DnsPropagationDelay)} cannot be negative.");
@@ -161,6 +175,14 @@ internal sealed class AutoHttpsOptionsValidator : IValidateOptions<AutoHttpsOpti
 
     private bool HasDnsProvider(AutoHttpsOptions options) =>
         options.DnsChallengeProvider is not null || (_registrations?.IsService(typeof(IDnsChallengeProvider)) ?? false);
+
+    private static void RequireAtMost(List<string> failures, TimeSpan value, string name)
+    {
+        if (value > MaxDuration)
+        {
+            failures.Add(string.Create(CultureInfo.InvariantCulture, $"{name} must be at most {MaxDuration.TotalDays} days."));
+        }
+    }
 
     private static void RequirePositive(List<string> failures, TimeSpan value, string name)
     {
