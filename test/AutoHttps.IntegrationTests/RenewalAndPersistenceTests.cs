@@ -9,6 +9,7 @@ using AutoHttps.Certificates;
 using AutoHttps.Hosting;
 using AutoHttps.IntegrationTests.TestCa;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
 
 namespace AutoHttps.IntegrationTests;
@@ -40,6 +41,58 @@ public class RenewalAndPersistenceTests
         TlsHandshakeResult handshake = await second.HandshakeAsync(
             "app.example.com", authority.RootCertificate, knownIntermediate: authority.IntermediateCertificate);
         Assert.True(handshake.ChainIsTrusted);
+    }
+
+    [Fact]
+    public async Task TheStoredCertificateIsServedFromTheFirstConnectionAfterARestart()
+    {
+        // During a rolling restart traffic arrives as soon as the server listens. A certificate still
+        // being read from the store at that point means those first visitors see the self-signed
+        // fallback, for as long as the store takes, which for a remote one is noticeable.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        string thumbprint;
+        await using (TestApplication first = await TestApplication.StartAsync(authority, Configure(storage)))
+        {
+            thumbprint = (await first.WaitForCertificateAsync("app.example.com", IssuanceTimeout)).Leaf.Thumbprint;
+        }
+
+        var slow = new SlowLoadingStore(new FileSystemStore(storage.Path), TimeSpan.FromSeconds(1));
+
+        await using TestApplication second = await TestApplication.StartAsync(
+            authority,
+            Configure(storage),
+            configureServices: services => services.Replace(ServiceDescriptor.Singleton<ICertificateStore>(slow)));
+
+        // No waiting: the very first handshake once the host reports started.
+        TlsHandshakeResult handshake = await second.HandshakeAsync(
+            "app.example.com", authority.RootCertificate, knownIntermediate: authority.IntermediateCertificate);
+
+        Assert.Equal(thumbprint, handshake.Leaf.Thumbprint);
+        Assert.True(handshake.ChainIsTrusted);
+    }
+
+    /// <summary>A store whose reads take a while, like one across a network.</summary>
+    private sealed class SlowLoadingStore : ICertificateStore
+    {
+        private readonly ICertificateStore _inner;
+        private readonly TimeSpan _delay;
+
+        public SlowLoadingStore(ICertificateStore inner, TimeSpan delay)
+        {
+            _inner = inner;
+            _delay = delay;
+        }
+
+        public async Task<CertificateMaterial?> LoadAsync(string name, CancellationToken cancellationToken)
+        {
+            await Task.Delay(_delay, cancellationToken);
+            return await _inner.LoadAsync(name, cancellationToken);
+        }
+
+        public Task SaveAsync(string name, CertificateMaterial material, CancellationToken cancellationToken) =>
+            _inner.SaveAsync(name, material, cancellationToken);
     }
 
     [Fact]

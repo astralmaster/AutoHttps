@@ -20,6 +20,7 @@ internal sealed class AutoHttpsService : BackgroundService
     private static readonly TimeSpan StartupGrace = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan MaxIssueThrottle = TimeSpan.FromHours(1);
     private static readonly TimeSpan MaxRateLimitWait = TimeSpan.FromHours(1);
+    private static readonly TimeSpan StartupLoadWait = TimeSpan.FromSeconds(10);
 
     private readonly AutoHttpsOptions _options;
     private readonly CertificateAcquirer _acquirer;
@@ -38,8 +39,10 @@ internal sealed class AutoHttpsService : BackgroundService
 
     private readonly TaskCompletionSource _firstCertificate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private Task<bool>? _preparation;
     private ServerCertificate? _current;
     private IReadOnlyList<string> _domains = [];
+    private string _storeName = string.Empty;
     private string _latestName = string.Empty;
     private string? _keyMismatchReported;
     private DateTimeOffset _loggedRenewal;
@@ -81,52 +84,34 @@ internal sealed class AutoHttpsService : BackgroundService
         _diagnostics = diagnostics;
     }
 
+    /// <summary>
+    /// Loads the stored certificate before the host carries on starting. The web server starts after the
+    /// hosted services registered ahead of it, so this puts the certificate in place before the first
+    /// handshake. Loading it from the background loop instead let the first connections after every
+    /// restart get the self-signed fallback while the store was read, which with a remote store can
+    /// take a while. A store slower than <see cref="StartupLoadWait"/> does not hold startup up any
+    /// longer: the load finishes in the background and the loop waits for it.
+    /// </summary>
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        _preparation = PrepareAsync();
+
+        Task timeout = Task.Delay(StartupLoadWait, _time, CancellationToken.None);
+        await Task.WhenAny(_preparation, timeout);
+
+        await base.StartAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        IReadOnlyList<string> domains = DomainNormalizer.Normalize(_options.DomainNames);
-        if (domains.Count == 0)
+        if (!await (_preparation ??= PrepareAsync()))
         {
             return;
         }
 
-        string storeName = StoreKey.ForCertificate(_options.CertificateAuthority, domains);
-        string description = string.Join(", ", domains);
-
-        _domains = domains;
-        _latestName = StoreKey.ForLatest(_options.CertificateAuthority);
-        _state.SetDomains(domains);
-
-        if (_options.ServeFallbackCertificate)
-        {
-            _selector.SetFallbackNames(domains);
-        }
-
-        if (_developmentCertificate.IsEnabled && _environment.IsDevelopment())
-        {
-            ServeDevelopmentCertificate(description);
-            return;
-        }
-
-        Log.ServiceStarting(_logger, description);
-
-        if (_store is not FileSystemStore && _lock is FileSystemLock local)
-        {
-            // A store other instances can read, with a lock only this machine can see, is the setup in
-            // which every replica orders its own certificate at the same moment. It is also a correct
-            // setup for a single instance, so this is said once and not treated as an error.
-            Log.LockNotShared(_logger, _store.GetType().Name, local.Root);
-        }
-
-        if (await AdoptFromStoreAsync(storeName, announce: false, stoppingToken) is { } stored)
-        {
-            // Kept so a later change of the configured names still finds this certificate. Done here
-            // as well as after issuance so a store written before the copy existed gains one too.
-            await RememberAsLatestAsync(stored, compareFirst: true, stoppingToken);
-        }
-        else
-        {
-            await AdoptPreviousAsync(storeName, description, stoppingToken);
-        }
+        string storeName = _storeName;
+        string description = string.Join(", ", _domains);
+        IReadOnlyList<string> domains = _domains;
 
         await WaitForApplicationStartedAsync(stoppingToken);
 
@@ -157,6 +142,64 @@ internal sealed class AutoHttpsService : BackgroundService
                 _nextRetry = Min(_nextRetry + _nextRetry, RetryCeiling());
             }
         }
+    }
+
+    /// <summary>
+    /// Everything that comes before the renewal loop: working out the names, serving a development
+    /// certificate when that is configured, and loading what the store holds. Returns false when there
+    /// is nothing for the loop to manage.
+    /// </summary>
+    private async Task<bool> PrepareAsync()
+    {
+        IReadOnlyList<string> domains = DomainNormalizer.Normalize(_options.DomainNames);
+        if (domains.Count == 0)
+        {
+            return false;
+        }
+
+        string storeName = StoreKey.ForCertificate(_options.CertificateAuthority, domains);
+        string description = string.Join(", ", domains);
+
+        _domains = domains;
+        _storeName = storeName;
+        _latestName = StoreKey.ForLatest(_options.CertificateAuthority);
+        _state.SetDomains(domains);
+
+        if (_options.ServeFallbackCertificate)
+        {
+            _selector.SetFallbackNames(domains);
+        }
+
+        if (_developmentCertificate.IsEnabled && _environment.IsDevelopment())
+        {
+            ServeDevelopmentCertificate(description);
+            return false;
+        }
+
+        Log.ServiceStarting(_logger, description);
+
+        if (_store is not FileSystemStore && _lock is FileSystemLock local)
+        {
+            // A store other instances can read, with a lock only this machine can see, is the setup in
+            // which every replica orders its own certificate at the same moment. It is also a correct
+            // setup for a single instance, so this is said once and not treated as an error.
+            Log.LockNotShared(_logger, _store.GetType().Name, local.Root);
+        }
+
+        // Not cancelled by shutdown: reading the store is short, and the loop that waits for this is
+        // cancelled anyway.
+        if (await AdoptFromStoreAsync(storeName, announce: false, CancellationToken.None) is { } stored)
+        {
+            // Kept so a later change of the configured names still finds this certificate. Done here
+            // as well as after issuance so a store written before the copy existed gains one too.
+            await RememberAsLatestAsync(stored, compareFirst: true, CancellationToken.None);
+        }
+        else
+        {
+            await AdoptPreviousAsync(storeName, description, CancellationToken.None);
+        }
+
+        return true;
     }
 
     private async Task RunOnceAsync(
