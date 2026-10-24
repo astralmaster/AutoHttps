@@ -378,6 +378,31 @@ public class CertificateIssuanceTests
     }
 
     [Fact]
+    public async Task AFinalizeThatWentThroughIsNotSentAgainWhenItsResponseWasLost()
+    {
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        // The finalize goes through and the certificate is issued, but the client hears orderNotReady.
+        // Finalizing a valid order again is refused just the same, and treating that as a failed order
+        // would issue a second certificate for the same names against the duplicate limit.
+        authority.Behavior.LoseNextFinalizeResponsesCount = 1;
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+        });
+
+        ServerCertificate certificate = await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+
+        Assert.Equal(1, authority.OrderCount);
+        TestIssuedCertificate issued = Assert.Single(authority.IssuedCertificates);
+        Assert.Equal(issued.Leaf.Thumbprint, certificate.Leaf.Thumbprint);
+        Assert.Equal(0, app.Log.CountOf(110));
+    }
+
+    [Fact]
     public async Task PollsTheAuthorizationUntilTheAuthorityMarksItValid()
     {
         using var storage = new TempStorage();

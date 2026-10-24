@@ -191,6 +191,11 @@ internal sealed class TestCaBehavior
     /// authority whose order has not yet flipped to ready would.</summary>
     public int NotReadyNextFinalizeCount { get; set; }
 
+    /// <summary>Issues the certificate for this many finalize requests but answers each with
+    /// orderNotReady, as a client sees when the response to a finalize that went through was lost and
+    /// its retry arrived after the order had moved on.</summary>
+    public int LoseNextFinalizeResponsesCount { get; set; }
+
     /// <summary>Issues certificates whose validity starts in the future, as a skewed authority clock would.</summary>
     public TimeSpan NotBeforeSkew { get; set; }
 

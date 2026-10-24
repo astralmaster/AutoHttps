@@ -85,9 +85,17 @@ internal sealed class CertificateAcquirer
             // section 7.4). Wait for readiness and finalize once more, rather than abandon the order
             // and order a fresh one against the authority's duplicate-order rate limit.
             Log.OrderNotReadyRetrying(_logger, description);
-            await client.WaitForOrderReadyAsync(
+            string status = await client.WaitForOrderReadyAsync(
                 order.Location, _options.ValidationTimeout, _options.PollInterval, cancellationToken);
-            await client.FinalizeOrderAsync(finalizeUrl, signingRequest, cancellationToken);
+
+            // An order already processing or valid was finalized by this same request: its response was
+            // lost on the way back, the retry was refused as a reused nonce, and the fresh attempt arrived
+            // after the authority had moved on. Finalizing again is refused the same way, which would
+            // abandon a certificate that is being issued and order a duplicate of it.
+            if (status == AcmeStatus.Ready)
+            {
+                await client.FinalizeOrderAsync(finalizeUrl, signingRequest, cancellationToken);
+            }
         }
 
         AcmeOrderResource completed = await client.WaitForOrderAsync(

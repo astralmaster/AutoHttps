@@ -885,6 +885,20 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
         order.CertificateId = issued.Id;
         order.Status = "valid";
 
+        if (Behavior.LoseNextFinalizeResponsesCount > 0)
+        {
+            Behavior.LoseNextFinalizeResponsesCount--;
+
+            // The certificate is issued and the order is valid, but the client hears orderNotReady, as
+            // when the response to a finalize that went through is lost and the retry arrives late.
+            await WriteProblemAsync(
+                context,
+                StatusCodes.Status403Forbidden,
+                "urn:ietf:params:acme:error:orderNotReady",
+                "The order is 'valid' and cannot be finalized.");
+            return;
+        }
+
         context.Response.Headers.Location = Url("order/" + order.Id);
         await WriteJsonAsync(context, StatusCodes.Status200OK, SerializeOrder(order));
     }

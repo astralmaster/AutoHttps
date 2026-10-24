@@ -221,9 +221,10 @@ internal sealed class AcmeClient
     /// <summary>
     /// Polls the order until it reaches <c>ready</c> (or a later state), used to recover when a
     /// finalize arrives a moment before the order has flipped to ready. RFC 8555 section 7.4 expects
-    /// the client to wait for readiness and finalize then, rather than abandon the order.
+    /// the client to wait for readiness and finalize then, rather than abandon the order. Returns the
+    /// state it reached, because a later one means a finalize already went through.
     /// </summary>
-    public async Task WaitForOrderReadyAsync(
+    public async Task<string> WaitForOrderReadyAsync(
         Uri orderUrl,
         TimeSpan timeout,
         TimeSpan pollInterval,
@@ -243,7 +244,7 @@ internal sealed class AcmeClient
                 case AcmeStatus.Ready:
                 case AcmeStatus.Processing:
                 case AcmeStatus.Valid:
-                    return;
+                    return order.Status;
                 case AcmeStatus.Invalid:
                     throw new AcmeException(
                         $"The certificate authority rejected the order: {order.Error?.Detail ?? "no detail supplied"}",
