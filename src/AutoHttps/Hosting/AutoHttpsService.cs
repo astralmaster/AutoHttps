@@ -272,8 +272,10 @@ internal sealed class AutoHttpsService : BackgroundService
 
                 // Persist before serving. A process that dies between the two would otherwise come
                 // back with nothing on disk and order all over again, which is the quickest way to
-                // run into a certificate authority's duplicate-certificate limit.
-                await SaveAsync(storeName, material, cancellationToken);
+                // run into a certificate authority's duplicate-certificate limit. For the same reason
+                // the write is not cancelled when the host starts shutting down: the authority has
+                // already issued the certificate, and a store write is short.
+                await SaveAsync(storeName, material, CancellationToken.None);
                 await RememberAsLatestAsync(material, compareFirst: false, cancellationToken);
 
                 Publish(certificate);

@@ -162,6 +162,55 @@ public class ResilienceTests
         await WaitUntilAsync(() => inspector.GetStatus().ConsecutiveFailures == 0, waiting);
     }
 
+    [Fact]
+    public async Task ACertificateBeingSavedWhenShutdownStartsIsStillSaved()
+    {
+        // The authority has already issued it. Abandoning the write because the host is stopping means
+        // the next start orders the same certificate again, towards the duplicate limit.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        var store = new SlowStore();
+
+        await using TestApplication app = await TestApplication.StartAsync(
+            authority,
+            options =>
+            {
+                options.DomainNames.Add("app.example.com");
+                options.StorageDirectory = storage.Path;
+            },
+            configureServices: services => services.Replace(ServiceDescriptor.Singleton<ICertificateStore>(store)));
+
+        await store.SaveStarted.Task.WaitAsync(IssuanceTimeout);
+        await app.StopAsync();
+
+        Assert.True(store.Saved, "The save was abandoned when the host stopped." + Environment.NewLine + app.Log.Describe());
+    }
+
+    /// <summary>A store whose writes take long enough for the host to start stopping during one.</summary>
+    private sealed class SlowStore : ICertificateStore
+    {
+        private volatile bool _saved;
+
+        public TaskCompletionSource SaveStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool Saved => _saved;
+
+        public Task<CertificateMaterial?> LoadAsync(string name, CancellationToken cancellationToken) =>
+            Task.FromResult<CertificateMaterial?>(null);
+
+        public async Task SaveAsync(string name, CertificateMaterial material, CancellationToken cancellationToken)
+        {
+            if (name.StartsWith("latest-", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            SaveStarted.TrySetResult();
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+            _saved = true;
+        }
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition, TestApplication app)
     {
         DateTimeOffset deadline = DateTimeOffset.UtcNow + IssuanceTimeout;
