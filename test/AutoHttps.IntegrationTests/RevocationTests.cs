@@ -15,10 +15,15 @@ public sealed class RevocationTests
     [Fact]
     public async Task RevokesTheServedCertificateWithTheGivenReason()
     {
+        using var storage = new TempStorage();
         await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
 
         await using TestApplication app = await TestApplication.StartAsync(
-            authority, options => options.DomainNames.Add("revoke.example"));
+            authority, options =>
+            {
+                options.DomainNames.Add("revoke.example");
+                options.StorageDirectory = storage.Path;
+            });
 
         ServerCertificate certificate = await app.WaitForCertificateAsync("revoke.example", Timeout);
         string thumbprint = certificate.Leaf.Thumbprint;
@@ -35,10 +40,15 @@ public sealed class RevocationTests
     [Fact]
     public async Task RevokesASuppliedCertificate()
     {
+        using var storage = new TempStorage();
         await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
 
         await using TestApplication app = await TestApplication.StartAsync(
-            authority, options => options.DomainNames.Add("revoke-supplied.example"));
+            authority, options =>
+            {
+                options.DomainNames.Add("revoke-supplied.example");
+                options.StorageDirectory = storage.Path;
+            });
 
         ServerCertificate certificate = await app.WaitForCertificateAsync("revoke-supplied.example", Timeout);
 
@@ -51,13 +61,18 @@ public sealed class RevocationTests
     [Fact]
     public async Task RevokeCurrentReturnsFalseWhenNothingIsServed()
     {
+        using var storage = new TempStorage();
         await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
 
         // Nothing validates, so no certificate is ever served and there is nothing to revoke.
         authority.Behavior.FailValidation = true;
 
         await using TestApplication app = await TestApplication.StartAsync(
-            authority, options => options.DomainNames.Add("never-issued.example"));
+            authority, options =>
+            {
+                options.DomainNames.Add("never-issued.example");
+                options.StorageDirectory = storage.Path;
+            });
 
         var manager = app.Services.GetRequiredService<IAutoHttpsCertificateManager>();
 

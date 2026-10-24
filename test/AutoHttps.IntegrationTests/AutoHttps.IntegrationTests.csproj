@@ -4,6 +4,11 @@
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+
+    <!-- The .NET 9 and later SDK tests each target framework in parallel by default. Two copies of this
+         suite at once compete for ports and for the CPU the TLS handshakes need, which is the same
+         starvation the runner settings below exist to prevent within one copy. -->
+    <TestTfmsInParallel>false</TestTfmsInParallel>
   </PropertyGroup>
 
   <ItemGroup>

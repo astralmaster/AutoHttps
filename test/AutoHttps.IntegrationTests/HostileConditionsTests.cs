@@ -190,13 +190,20 @@ public class HostileConditionsTests
     [Fact]
     public async Task AnEmptyAccountKeyFileDoesNotWedgeStartup()
     {
+        // A truncated account key, as a full disk or a crash mid-write leaves it, under the exact name
+        // the store reads. Treated as a key it would fail every order for good. It has to count as no
+        // key, so a new one is made and written over it.
         using var storage = new TempStorage();
         await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
 
-        await File.WriteAllTextAsync(Path.Combine(storage.Path, "unrelated.txt"), "junk");
+        string accountKey = Path.Combine(
+            storage.Path, StoreKey.ForAccount(authority.DirectoryUri, "operator@example.com") + ".account.pem");
+        await File.WriteAllTextAsync(accountKey, string.Empty);
+
         await using TestApplication app = await TestApplication.StartAsync(authority, Configure(storage));
 
         await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+        Assert.StartsWith("-----BEGIN", await File.ReadAllTextAsync(accountKey), StringComparison.Ordinal);
     }
 
     [Fact]

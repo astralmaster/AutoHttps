@@ -12,6 +12,7 @@ public sealed class StartupCertificatePolicyTests
     [Fact]
     public async Task StopsTheApplicationWhenNoCertificateArrivesAndItIsRequired()
     {
+        using var storage = new TempStorage();
         await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
 
         // Nothing will ever validate, so no certificate is issued and the policy has to act.
@@ -20,6 +21,7 @@ public sealed class StartupCertificatePolicyTests
         await using TestApplication app = await TestApplication.StartAsync(authority, options =>
         {
             options.DomainNames.Add("startup-required.example");
+            options.StorageDirectory = storage.Path;
             options.RequireCertificateOnStartup = true;
             options.StartupCertificateTimeout = TimeSpan.FromSeconds(2);
         });
@@ -47,20 +49,32 @@ public sealed class StartupCertificatePolicyTests
     [Fact]
     public async Task KeepsRunningWhenTheCertificateArrivesInTime()
     {
+        // The certificate arrives well inside the timeout, and the application has to still be running
+        // once the timeout has passed. Checking before then would also pass for a watcher that stops the
+        // application at the timeout regardless of the certificate.
+        TimeSpan timeout = TimeSpan.FromSeconds(6);
+
+        using var storage = new TempStorage();
         await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
 
+        DateTimeOffset started = DateTimeOffset.UtcNow;
         await using TestApplication app = await TestApplication.StartAsync(authority, options =>
         {
             options.DomainNames.Add("startup-ok.example");
+            options.StorageDirectory = storage.Path;
             options.RequireCertificateOnStartup = true;
-            options.StartupCertificateTimeout = TimeSpan.FromSeconds(10);
+            options.StartupCertificateTimeout = timeout;
         });
 
-        await app.WaitForCertificateAsync("startup-ok.example", TimeSpan.FromSeconds(30));
+        await app.WaitForCertificateAsync("startup-ok.example", timeout);
+
+        TimeSpan pastTheTimeout = started + timeout + TimeSpan.FromSeconds(2) - DateTimeOffset.UtcNow;
+        if (pastTheTimeout > TimeSpan.Zero)
+        {
+            await Task.Delay(pastTheTimeout);
+        }
 
         var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
-        await Task.Delay(TimeSpan.FromSeconds(3));
-
         Assert.False(lifetime.ApplicationStopping.IsCancellationRequested);
         Assert.Equal(0, app.Log.CountOf(137));
     }

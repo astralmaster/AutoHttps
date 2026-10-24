@@ -14,11 +14,16 @@ public sealed class PreferredChainTests
     [Fact]
     public async Task ServesTheDefaultChainWhenNoPreferenceIsSet()
     {
+        using var storage = new TempStorage();
         await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
         authority.Behavior.OfferAlternateChain = true;
 
         await using TestApplication app = await TestApplication.StartAsync(
-            authority, options => options.DomainNames.Add("preferred-default.example"));
+            authority, options =>
+            {
+                options.DomainNames.Add("preferred-default.example");
+                options.StorageDirectory = storage.Path;
+            });
 
         ServerCertificate certificate = await app.WaitForCertificateAsync("preferred-default.example", Timeout);
 
@@ -30,12 +35,14 @@ public sealed class PreferredChainTests
     [Fact]
     public async Task ServesTheAlternateChainWhenPreferredChainMatchesIt()
     {
+        using var storage = new TempStorage();
         await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
         authority.Behavior.OfferAlternateChain = true;
 
         await using TestApplication app = await TestApplication.StartAsync(authority, options =>
         {
             options.DomainNames.Add("preferred-alternate.example");
+            options.StorageDirectory = storage.Path;
             options.PreferredChain = authority.AlternateRootCommonName;
         });
 
@@ -48,12 +55,14 @@ public sealed class PreferredChainTests
     [Fact]
     public async Task FallsBackToTheDefaultChainWhenThePreferenceIsNotOffered()
     {
+        using var storage = new TempStorage();
         await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
         authority.Behavior.OfferAlternateChain = true;
 
         await using TestApplication app = await TestApplication.StartAsync(authority, options =>
         {
             options.DomainNames.Add("preferred-missing.example");
+            options.StorageDirectory = storage.Path;
             options.PreferredChain = "No Such Root Authority";
         });
 
