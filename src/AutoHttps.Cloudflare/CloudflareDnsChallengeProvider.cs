@@ -25,7 +25,7 @@ public sealed class CloudflareDnsChallengeProvider : IDnsChallengeProvider
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly CloudflareDnsOptions _options;
-    private readonly ConcurrentDictionary<string, string> _zoneIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string?> _zoneIds = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Initializes a new instance of the <see cref="CloudflareDnsChallengeProvider"/> class.</summary>
     public CloudflareDnsChallengeProvider(IHttpClientFactory httpClientFactory, IOptions<CloudflareDnsOptions> options)
@@ -77,24 +77,34 @@ public sealed class CloudflareDnsChallengeProvider : IDnsChallengeProvider
             : recordName;
         domain = domain.TrimEnd('.');
 
-        foreach (KeyValuePair<string, string> cached in _zoneIds)
-        {
-            if (IsWithin(domain, cached.Key))
-            {
-                return cached.Value;
-            }
-        }
-
+        // Most specific first, from the cache or the API alike. Taking any cached zone that contains the
+        // name would answer dev.example.com with example.com once that was cached, even where
+        // dev.example.com is a zone of its own, and the record would land where no resolver looks.
         foreach (string candidate in Suffixes(domain))
         {
+            if (_zoneIds.TryGetValue(candidate, out string? cached))
+            {
+                if (cached is not null)
+                {
+                    return cached;
+                }
+
+                continue;
+            }
+
             using JsonDocument document = await SendAsync(
                 HttpMethod.Get, $"zones?name={Uri.EscapeDataString(candidate)}", body: null, cancellationToken);
 
             JsonElement result = document.RootElement.GetProperty("result");
-            if (result.ValueKind == JsonValueKind.Array && result.GetArrayLength() > 0)
+            string? id = result.ValueKind == JsonValueKind.Array && result.GetArrayLength() > 0
+                ? result[0].GetProperty("id").GetString()
+                : null;
+
+            // A miss is remembered too, so each later lookup does not ask about it again.
+            _zoneIds[candidate] = id;
+
+            if (id is not null)
             {
-                string id = result[0].GetProperty("id").GetString()!;
-                _zoneIds[candidate] = id;
                 return id;
             }
         }
@@ -177,10 +187,6 @@ public sealed class CloudflareDnsChallengeProvider : IDnsChallengeProvider
 
         return Encoding.UTF8.GetString(stream.ToArray());
     }
-
-    private static bool IsWithin(string domain, string zone) =>
-        string.Equals(domain, zone, StringComparison.OrdinalIgnoreCase) ||
-        domain.EndsWith("." + zone, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The candidate zone names for a domain, longest first, down to the two-label registrable name,

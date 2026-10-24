@@ -46,6 +46,43 @@ public sealed class Route53DnsChallengeProviderTests
     }
 
     [Fact]
+    public async Task ADelegatedSubzoneIsUsedEvenAfterItsParentWasCached()
+    {
+        // example.com and dev.example.com as separate hosted zones, and an order that validates the
+        // apex first. A record for dev.example.com written into the parent is never seen, because
+        // resolvers follow the delegation to the child zone.
+        var route53 = new FakeRoute53
+        {
+            ZoneResolver = name => name switch
+            {
+                "example.com" => "parent",
+                "dev.example.com" => "child",
+                _ => null,
+            },
+        };
+        Route53DnsChallengeProvider provider = Provider(route53, _ => { });
+
+        await provider.CreateTxtRecordAsync("_acme-challenge.example.com", "apex", CancellationToken.None);
+        await provider.CreateTxtRecordAsync("_acme-challenge.dev.example.com", "sub", CancellationToken.None);
+
+        Assert.Equal(["parent", "child"], route53.Changes.Select(change => change.ZoneId).ToArray());
+    }
+
+    [Fact]
+    public async Task ZoneLookupsAreRememberedIncludingTheNamesThatAreNotZones()
+    {
+        var route53 = new FakeRoute53 { ZoneResolver = name => name == "example.com" ? "zoneX" : null };
+        Route53DnsChallengeProvider provider = Provider(route53, _ => { });
+
+        await provider.CreateTxtRecordAsync("_acme-challenge.sub.example.com", "one", CancellationToken.None);
+        int afterFirst = route53.ZoneQueries.Count;
+        await provider.CreateTxtRecordAsync("_acme-challenge.sub.example.com", "two", CancellationToken.None);
+
+        Assert.Equal(["sub.example.com", "example.com"], route53.ZoneQueries.Take(afterFirst).ToArray());
+        Assert.Equal(afterFirst, route53.ZoneQueries.Count);
+    }
+
+    [Fact]
     public async Task CreateAddsItsValueToTheValuesAlreadyAtTheName()
     {
         // A wildcard and its apex in one order, or another client ordering for the same name, put a

@@ -68,6 +68,65 @@ public sealed class CloudflareDnsChallengeProviderTests
     }
 
     [Fact]
+    public async Task ADelegatedSubzoneIsUsedEvenAfterItsParentWasCached()
+    {
+        // example.com and dev.example.com as separate zones, and an order that validates the apex first.
+        // A record for dev.example.com written into the parent is never seen, because resolvers follow
+        // the delegation to the child zone.
+        var api = new StubApi
+        {
+            Responder = (request, _) =>
+            {
+                string path = request.RequestUri!.PathAndQuery;
+                if (request.Method == HttpMethod.Get && path.EndsWith("zones?name=dev.example.com", StringComparison.Ordinal))
+                {
+                    return (200, Success("""[{"id":"child","name":"dev.example.com"}]"""));
+                }
+
+                if (request.Method == HttpMethod.Get && path.EndsWith("zones?name=example.com", StringComparison.Ordinal))
+                {
+                    return (200, Success("""[{"id":"parent","name":"example.com"}]"""));
+                }
+
+                return (200, Success("""{"id":"rec1"}"""));
+            },
+        };
+        CloudflareDnsChallengeProvider provider = Provider(api, o => o.ApiToken = Token);
+
+        await provider.CreateTxtRecordAsync("_acme-challenge.example.com", "apex", CancellationToken.None);
+        await provider.CreateTxtRecordAsync("_acme-challenge.dev.example.com", "sub", CancellationToken.None);
+
+        string[] posts = [.. api.Requests.Where(r => r.Method == "POST").Select(r => r.Path)];
+        Assert.Equal(2, posts.Length);
+        Assert.Contains("/zones/parent/dns_records", posts[0], StringComparison.Ordinal);
+        Assert.Contains("/zones/child/dns_records", posts[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ZoneLookupsAreRememberedIncludingTheNamesThatAreNotZones()
+    {
+        var api = new StubApi
+        {
+            Responder = (request, _) =>
+            {
+                string path = request.RequestUri!.PathAndQuery;
+                if (request.Method == HttpMethod.Get && path.EndsWith("zones?name=example.com", StringComparison.Ordinal))
+                {
+                    return (200, Success("""[{"id":"zoneX","name":"example.com"}]"""));
+                }
+
+                return request.Method == HttpMethod.Get ? (200, Success("[]")) : (200, Success("""{"id":"rec1"}"""));
+            },
+        };
+        CloudflareDnsChallengeProvider provider = Provider(api, o => o.ApiToken = Token);
+
+        await provider.CreateTxtRecordAsync("_acme-challenge.sub.example.com", "one", CancellationToken.None);
+        await provider.CreateTxtRecordAsync("_acme-challenge.sub.example.com", "two", CancellationToken.None);
+
+        Assert.Equal(2, api.Count(r => r.Method == "GET" && r.Path.Contains("zones?name=", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task DeleteFindsMatchingRecordsAndRemovesThem()
     {
         var api = new StubApi

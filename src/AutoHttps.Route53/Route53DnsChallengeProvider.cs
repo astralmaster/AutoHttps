@@ -23,7 +23,7 @@ public sealed class Route53DnsChallengeProvider : IDnsChallengeProvider
     private readonly IRoute53Client _client;
     private readonly Route53DnsOptions _options;
     private readonly TimeProvider _time;
-    private readonly ConcurrentDictionary<string, string> _zoneIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string?> _zoneIds = new(StringComparer.OrdinalIgnoreCase);
 
     internal Route53DnsChallengeProvider(IRoute53Client client, IOptions<Route53DnsOptions> options, TimeProvider? time = null)
     {
@@ -130,19 +130,28 @@ public sealed class Route53DnsChallengeProvider : IDnsChallengeProvider
             : recordName;
         domain = domain.TrimEnd('.');
 
-        foreach (KeyValuePair<string, string> cached in _zoneIds)
-        {
-            if (IsWithin(domain, cached.Key))
-            {
-                return cached.Value;
-            }
-        }
-
+        // Most specific first, from the cache or the API alike. Taking any cached zone that contains the
+        // name would answer dev.example.com with example.com once that was cached, even where
+        // dev.example.com is a hosted zone of its own, and the record would land where no resolver looks.
         foreach (string candidate in Suffixes(domain))
         {
-            if (await _client.FindZoneIdAsync(candidate, cancellationToken) is { } zoneId)
+            if (_zoneIds.TryGetValue(candidate, out string? cached))
             {
-                _zoneIds[candidate] = zoneId;
+                if (cached is not null)
+                {
+                    return cached;
+                }
+
+                continue;
+            }
+
+            string? zoneId = await _client.FindZoneIdAsync(candidate, cancellationToken);
+
+            // A miss is remembered too, so each later lookup does not ask about it again.
+            _zoneIds[candidate] = zoneId;
+
+            if (zoneId is not null)
+            {
                 return zoneId;
             }
         }
@@ -153,10 +162,6 @@ public sealed class Route53DnsChallengeProvider : IDnsChallengeProvider
     }
 
     private static string Quote(string value) => "\"" + value + "\"";
-
-    private static bool IsWithin(string domain, string zone) =>
-        string.Equals(domain, zone, StringComparison.OrdinalIgnoreCase) ||
-        domain.EndsWith("." + zone, StringComparison.OrdinalIgnoreCase);
 
     private static IEnumerable<string> Suffixes(string domain)
     {
