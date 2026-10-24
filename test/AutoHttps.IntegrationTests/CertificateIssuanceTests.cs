@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
@@ -450,6 +451,86 @@ public class CertificateIssuanceTests
 
         await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
         Assert.Equal(1, authority.AccountCount);
+    }
+
+    [Fact]
+    public async Task AStoredAccountIsFoundAgainWithoutSpendingTheExternalAccountBindingTwice()
+    {
+        // Google Trust Services bindings work once and expire after seven days, but the configuration
+        // keeps them, because the diagnostics insist on one for an authority that requires it. Sending
+        // it again on every start fails at an authority that checks it before matching the key, so a
+        // stored key has to find its account without it.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        byte[] hmacKey = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        authority.Behavior.RequireExternalAccountBinding = true;
+        authority.Behavior.SingleUseExternalAccountBinding = true;
+        authority.Behavior.ExternalAccountHmacKey = hmacKey;
+
+        Action<AutoHttpsOptions> configure = options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+            options.ExternalAccountBinding = new ExternalAccountBinding(
+                "eab-key-id",
+                Convert.ToBase64String(hmacKey).TrimEnd('=').Replace('+', '-').Replace('/', '_'));
+        };
+
+        await using (TestApplication first = await TestApplication.StartAsync(authority, configure))
+        {
+            await first.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+        }
+
+        // Nothing stored but the account key, so the next start has to order, and so needs the account.
+        foreach (string certificate in Directory.GetFiles(storage.Path, "*.crt.pem"))
+        {
+            File.Delete(certificate);
+        }
+
+        await using TestApplication second = await TestApplication.StartAsync(authority, configure);
+        await second.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+
+        Assert.Equal(1, authority.AccountCount);
+        Assert.Equal(2, authority.OrderCount);
+        Assert.True(authority.AccountLookups >= 1, "The stored key was registered again instead of looked up.");
+    }
+
+    [Fact]
+    public async Task AStoredKeyTheAuthorityDoesNotKnowIsRegistered()
+    {
+        // The other side of the lookup: a key in the store whose account the authority has no record
+        // of, as after a move to a new authority endpoint, still ends up with an account.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority first = await TestCertificateAuthority.StartAsync();
+
+        await using (TestApplication app = await TestApplication.StartAsync(first, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+        }))
+        {
+            await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+        }
+
+        await using TestCertificateAuthority second = await TestCertificateAuthority.StartAsync();
+
+        // A different directory URL names a different account key, so the stored one is copied across
+        // to make the second authority see a key it has never registered.
+        string[] keys = Directory.GetFiles(storage.Path, "*.account.pem");
+        string moved = Path.Combine(storage.Path, StoreKey.ForAccount(second.DirectoryUri, "operator@example.com") + ".account.pem");
+        File.Copy(Assert.Single(keys), moved);
+
+        await using TestApplication restarted = await TestApplication.StartAsync(second, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+        });
+
+        await restarted.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+
+        Assert.True(second.AccountLookups >= 1);
+        Assert.Equal(1, second.AccountCount);
     }
 
     [Fact]

@@ -47,6 +47,8 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     private int _orderAttempts;
     private int _sawReplaces;
     private int _refusedReplaces;
+    private int _accountLookups;
+    private int _bindingUsed;
     private readonly ConcurrentQueue<DateTimeOffset> _orderAttemptTimes = new();
     private readonly ConcurrentQueue<DateTimeOffset> _authorizationPollTimes = new();
 
@@ -93,6 +95,9 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     /// <summary>How many orders were refused because their replaces field named a certificate the
     /// authority could not match to the ordering account.</summary>
     public int RefusedReplaces => Volatile.Read(ref _refusedReplaces);
+
+    /// <summary>How many onlyReturnExisting lookups the authority answered.</summary>
+    public int AccountLookups => Volatile.Read(ref _accountLookups);
 
     public IReadOnlyList<DateTimeOffset> OrderAttemptTimes => _orderAttemptTimes.ToArray();
 
@@ -244,6 +249,28 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
         using JsonDocument payload = JsonDocument.Parse(request.Payload.Length == 0 ? "{}" : request.Payload);
         JsonElement root = payload.RootElement;
 
+        // RFC 8555 section 7.3.1: a lookup by key, which never creates an account and needs neither
+        // the agreement nor a binding. Boulder and Pebble answer it before checking either.
+        if (root.TryGetProperty("onlyReturnExisting", out JsonElement onlyExisting) && onlyExisting.ValueKind == JsonValueKind.True)
+        {
+            Interlocked.Increment(ref _accountLookups);
+            string key = TestJws.Thumbprint(jwk);
+
+            if (_accounts.Values.FirstOrDefault(a => a.Thumbprint == key) is { } found)
+            {
+                context.Response.Headers.Location = Url("account/" + found.Id);
+                await WriteJsonAsync(context, StatusCodes.Status200OK, SerializeAccount(found));
+                return;
+            }
+
+            await WriteProblemAsync(
+                context,
+                StatusCodes.Status400BadRequest,
+                "urn:ietf:params:acme:error:accountDoesNotExist",
+                "No account exists for this key.");
+            return;
+        }
+
         if (!root.TryGetProperty("termsOfServiceAgreed", out JsonElement agreed) || !agreed.GetBoolean())
         {
             await WriteProblemAsync(
@@ -319,6 +346,19 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
                 StatusCodes.Status400BadRequest,
                 "urn:ietf:params:acme:error:malformed",
                 "The external account binding is not valid.");
+            return false;
+        }
+
+        // Google Trust Services issues bindings that work once. This authority checks the binding before
+        // it looks for an existing account, so a client that sends it again for a key it already
+        // registered is refused, as it would be by any authority that orders its checks that way.
+        if (Behavior.SingleUseExternalAccountBinding && Interlocked.Exchange(ref _bindingUsed, 1) == 1)
+        {
+            await WriteProblemAsync(
+                context,
+                StatusCodes.Status400BadRequest,
+                "urn:ietf:params:acme:error:unauthorized",
+                "The external account binding has already been used.");
             return false;
         }
 

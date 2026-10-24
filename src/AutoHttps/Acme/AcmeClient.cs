@@ -66,6 +66,40 @@ internal sealed class AcmeClient
         return _keyId;
     }
 
+    /// <summary>
+    /// Looks up the account this key already has, without creating one (RFC 8555 section 7.3.1,
+    /// onlyReturnExisting). Returns false when the authority knows no account for the key.
+    /// </summary>
+    public async Task<bool> FindAccountAsync(CancellationToken cancellationToken)
+    {
+        AcmeDirectory directory = await _http.GetDirectoryAsync(cancellationToken);
+        Uri newAccount = directory.NewAccount
+            ?? throw new AcmeException("The ACME directory does not advertise a newAccount endpoint.");
+
+        AcmeResponse<AcmeAccountResource> response;
+        try
+        {
+            response = await _http.PostAsync(
+                _accountKey,
+                keyId: null,
+                newAccount,
+                """{"onlyReturnExisting":true}""",
+                AcmeJsonContext.Default.AcmeAccountResource,
+                cancellationToken);
+        }
+        catch (AcmeException ex) when (ex.ErrorType == AcmeErrorTypes.AccountDoesNotExist)
+        {
+            return false;
+        }
+
+        Uri location = response.Location
+            ?? throw new AcmeException("The certificate authority did not return an account URL.");
+
+        _keyId = location.AbsoluteUri;
+        Log.AccountFound(_logger, _keyId);
+        return true;
+    }
+
     public async Task<AcmeOrder> CreateOrderAsync(
         IReadOnlyList<AcmeIdentifier> identifiers,
         string? profile,

@@ -277,4 +277,13 @@ internal static partial class Log
         Message = "The certificate for {Domains} has a different kind of key than KeyAlgorithm ({KeyAlgorithm}) now " +
                   "asks for, so it is being replaced. It stays in use until the new one is issued.")]
     public static partial void KeyAlgorithmChanged(ILogger logger, string domains, KeyAlgorithm keyAlgorithm);
+
+    [LoggerMessage(EventId = 152, Level = LogLevel.Debug, Message = "Found the existing ACME account {AccountUrl} for the stored account key.")]
+    public static partial void AccountFound(ILogger logger, string accountUrl);
+
+    [LoggerMessage(
+        EventId = 153,
+        Level = LogLevel.Debug,
+        Message = "Looking up the existing ACME account was refused ({Detail}), so the account is registered instead.")]
+    public static partial void AccountLookupRefused(ILogger logger, string detail);
 }

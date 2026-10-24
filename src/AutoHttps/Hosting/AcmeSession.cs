@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutoHttps.Acme;
 using AutoHttps.Certificates;
+using AutoHttps.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -20,6 +21,7 @@ internal sealed class AcmeSession : IDisposable
 
     private AcmeClient? _client;
     private AcmeKey? _accountKey;
+    private bool _keyFromStore;
     private bool _registered;
 
     public AcmeSession(
@@ -57,11 +59,14 @@ internal sealed class AcmeSession : IDisposable
 
             if (requireAccount && !_registered)
             {
-                await client.RegisterAccountAsync(
-                    [BuildContact(_options.EmailAddress!)],
-                    _options.AcceptTermsOfService,
-                    _options.ExternalAccountBinding,
-                    cancellationToken);
+                if (!(_keyFromStore && await FindAccountAsync(client, cancellationToken)))
+                {
+                    await client.RegisterAccountAsync(
+                        [BuildContact(_options.EmailAddress!)],
+                        _options.AcceptTermsOfService,
+                        _options.ExternalAccountBinding,
+                        cancellationToken);
+                }
 
                 await PersistAccountKeyAsync(cancellationToken);
                 Volatile.Write(ref _registered, true);
@@ -88,11 +93,34 @@ internal sealed class AcmeSession : IDisposable
         _accountKey?.Dispose();
     }
 
+    /// <summary>
+    /// Finds the account a stored key already has instead of registering again. Registering an
+    /// existing key returns the same account, but it sends the external account binding again, and
+    /// some authorities issue bindings that work once and expire within days: Google Trust Services
+    /// keys are single use and last 7 days. An authority that checks the binding before matching the
+    /// key would then refuse every restart after the first week.
+    /// </summary>
+    private async Task<bool> FindAccountAsync(AcmeClient client, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await client.FindAccountAsync(cancellationToken);
+        }
+        catch (AcmeException ex) when (ex is not AcmeRateLimitException && ex.StatusCode is >= 400 and < 500)
+        {
+            // RFC 8555 requires the lookup, but registering is what this did before it existed, so an
+            // authority that refuses the lookup for some other reason still gets an account.
+            Log.AccountLookupRefused(_logger, ex.Detail ?? ex.Message);
+            return false;
+        }
+    }
+
     private async Task<AcmeClient> CreateClientAsync(CancellationToken cancellationToken)
     {
         string name = AccountKeyName;
         string? existing = await _accountKeyStore.LoadAsync(name, cancellationToken);
 
+        _keyFromStore = existing is not null;
         _accountKey = existing is null ? AcmeKey.CreateEcdsa() : AcmeKey.ImportPem(existing);
 
         var http = new AcmeHttpClient(

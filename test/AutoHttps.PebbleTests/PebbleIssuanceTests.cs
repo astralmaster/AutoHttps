@@ -349,6 +349,45 @@ public class PebbleIssuanceTests
     }
 
     [Fact]
+    public async Task FindsTheStoredAccountWithoutRegisteringItAgain()
+    {
+        // Registering a key that already has an account would also work against Pebble, but it sends
+        // the external account binding again, which an authority with single use bindings refuses. The
+        // lookup by key (onlyReturnExisting) is what a restart has to use, and Pebble implements it.
+        using var storage = new TempStorage();
+        string domain = NewDomain();
+
+        await using (PebbleApplication first = await PebbleApplication.StartAsync(_pebble, options =>
+        {
+            options.DomainNames.Add(domain);
+            options.StorageDirectory = storage.Path;
+        }))
+        {
+            await first.WaitForCertificateAsync(domain, Timeout);
+            Assert.True(first.Log.CountOf(103) > 0, "The first start never registered an account.");
+        }
+
+        // Only the account key is left, so the next start has to order and needs the account to do it.
+        foreach (string certificate in Directory.GetFiles(storage.Path, "*.crt.pem"))
+        {
+            File.Delete(certificate);
+        }
+
+        await using PebbleApplication second = await PebbleApplication.StartAsync(_pebble, options =>
+        {
+            options.DomainNames.Add(domain);
+            options.StorageDirectory = storage.Path;
+        });
+
+        await second.WaitForCertificateAsync(domain, Timeout);
+
+        Assert.True(
+            second.Log.CountOf(152) > 0,
+            "Pebble did not answer the lookup for the stored key:" + Environment.NewLine + second.Log.Describe());
+        Assert.Equal(0, second.Log.CountOf(103));
+    }
+
+    [Fact]
     public async Task SurvivesTheNoncesPebbleRandomlyRejects()
     {
         using var storage = new TempStorage();

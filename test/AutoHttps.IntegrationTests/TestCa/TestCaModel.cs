@@ -155,6 +155,10 @@ internal sealed class TestCaBehavior
 
     public string? ExternalAccountKeyId { get; set; }
 
+    /// <summary>Accepts the external account binding once and refuses it after that, as Google Trust
+    /// Services does with the keys it issues.</summary>
+    public bool SingleUseExternalAccountBinding { get; set; }
+
     public int PollsBeforeAuthorizationValid { get; set; }
 
     /// <summary>The Retry-After the authority returns while an authorization it has been asked to
