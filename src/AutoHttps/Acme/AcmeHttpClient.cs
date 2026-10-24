@@ -310,7 +310,7 @@ internal sealed class AcmeHttpClient
         Uri? requestUri,
         string body)
     {
-        string detail = problem?.Detail ?? (body.Length <= 512 ? body : body[..512]);
+        string detail = problem?.Describe() ?? (body.Length <= 512 ? body : body[..512]);
         string message = string.Create(
             CultureInfo.InvariantCulture,
             $"The certificate authority rejected the request to '{requestUri}' with status {(int)statusCode}: {detail}");

@@ -190,7 +190,7 @@ internal sealed class AcmeClient
                     AcmeProblem? error = FindChallengeError(authorization);
                     throw new AcmeException(
                         $"Validation of '{authorization.Identifier?.Value}' failed: " +
-                        (error?.Detail ?? error?.Type ?? $"the authorization status is '{authorization.Status}'"),
+                        (error?.Describe() ?? $"the authorization status is '{authorization.Status}'"),
                         error?.Type,
                         error?.Detail,
                         error?.Status);
@@ -250,7 +250,7 @@ internal sealed class AcmeClient
                     return order.Status;
                 case AcmeStatus.Invalid:
                     throw new AcmeException(
-                        $"The certificate authority rejected the order: {order.Error?.Detail ?? "no detail supplied"}",
+                        $"The certificate authority rejected the order: {order.Error?.Describe() ?? "no detail supplied"}",
                         order.Error?.Type,
                         order.Error?.Detail,
                         order.Error?.Status);
@@ -288,7 +288,7 @@ internal sealed class AcmeClient
                     return order;
                 case AcmeStatus.Invalid:
                     throw new AcmeException(
-                        $"The certificate authority rejected the order: {order.Error?.Detail ?? "no detail supplied"}",
+                        $"The certificate authority rejected the order: {order.Error?.Describe() ?? "no detail supplied"}",
                         order.Error?.Type,
                         order.Error?.Detail,
                         order.Error?.Status);

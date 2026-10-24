@@ -269,6 +269,45 @@ public class AcmeHttpClientTests
     }
 
     [Fact]
+    public async Task EveryFailedIdentifierAndTheLinkToActOnReachTheMessage()
+    {
+        // Boulder names one identifier in the top-level detail of a failure across several names and
+        // lists the rest only as subproblems, and a userActionRequired error puts the page to visit in
+        // instance. Keeping only the detail hid which names failed and what to do.
+        const string body = """
+            {
+              "type": "urn:ietf:params:acme:error:rejectedIdentifier",
+              "detail": "Error creating new order :: Cannot issue for \"a.example\" (and 1 more problems. Refer to sub-problems for more information.)",
+              "status": 400,
+              "instance": "https://acme.example.com/agreement",
+              "subproblems": [
+                { "type": "urn:ietf:params:acme:error:rejectedIdentifier", "detail": "Domain name contains an invalid label", "identifier": { "type": "dns", "value": "a.example" } },
+                { "type": "urn:ietf:params:acme:error:caa", "detail": "CAA record forbids issuance", "identifier": { "type": "dns", "value": "b.example" } }
+              ]
+            }
+            """;
+
+        var handler = new StubHandler((request, _) => request.RequestUri!.AbsolutePath switch
+        {
+            "/directory" => Json(DirectoryJson),
+            "/new-nonce" => WithNonce(new HttpResponseMessage(HttpStatusCode.NoContent), "n"),
+            _ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/problem+json"),
+            },
+        });
+
+        AcmeHttpClient client = Create(handler, out AcmeKey key);
+
+        AcmeException exception = await Assert.ThrowsAsync<AcmeException>(() => client.PostAsync(
+            key, "kid", new Uri("https://acme.example.com/new-order"), "{}", AcmeJsonContext.Default.AcmeOrderResource, CancellationToken.None));
+
+        Assert.Contains("a.example: Domain name contains an invalid label", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("b.example: CAA record forbids issuance", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("https://acme.example.com/agreement", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ATransportFailureIsRetriedAndThenReported()
     {
         var handler = new StubHandler((_, _) => throw new HttpRequestException("connection refused"));

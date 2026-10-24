@@ -76,6 +76,40 @@ internal sealed class AcmeProblem
     [JsonPropertyName("status")] public int? Status { get; set; }
     [JsonPropertyName("subproblems")] public IReadOnlyList<AcmeProblem>? Subproblems { get; set; }
     [JsonPropertyName("identifier")] public AcmeIdentifier? Identifier { get; set; }
+    [JsonPropertyName("instance")] public string? Instance { get; set; }
+
+    /// <summary>
+    /// The text an operator needs from the problem. The top-level detail of a failure across several
+    /// names typically names one of them and refers to the subproblems for the rest (RFC 8555 section
+    /// 6.7.1), and a userActionRequired error puts the page to visit in instance (section 7.3.3), so
+    /// both are carried along rather than dropped.
+    /// </summary>
+    public string Describe()
+    {
+        var text = new System.Text.StringBuilder(Detail ?? Type ?? "no detail supplied");
+
+        if (Subproblems is { Count: > 0 } subproblems)
+        {
+            text.Append(" (");
+            for (int i = 0; i < subproblems.Count; i++)
+            {
+                AcmeProblem subproblem = subproblems[i];
+                text.Append(i == 0 ? string.Empty : "; ")
+                    .Append(subproblem.Identifier?.Value ?? "unnamed")
+                    .Append(": ")
+                    .Append(subproblem.Detail ?? subproblem.Type ?? "no detail supplied");
+            }
+
+            text.Append(')');
+        }
+
+        if (!string.IsNullOrWhiteSpace(Instance))
+        {
+            text.Append(" See ").Append(Instance);
+        }
+
+        return text.ToString();
+    }
 }
 
 internal sealed class AcmeRenewalInfoResource
