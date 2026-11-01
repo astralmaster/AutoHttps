@@ -125,6 +125,11 @@ public sealed class RenewOnDemandTests
         await using TestApplication second = await TestApplication.StartAsync(authority, configure);
         Assert.Equal(original, (await second.WaitForCertificateAsync("app.example.com", IssuanceTimeout)).Leaf.Thumbprint);
 
+        // An instance takes a stored certificate only when it started later than its own, and start
+        // times are kept to the second. Without the pause, a fast machine issues the replacement in the
+        // same second as the original, and the second instance orders a certificate of its own.
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+
         await Task.WhenAll(
             Manager(first).RenewAsync(RevocationReason.KeyCompromise),
             Manager(second).RenewAsync(RevocationReason.KeyCompromise)).WaitAsync(TimeSpan.FromSeconds(90));
