@@ -577,7 +577,9 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
                     AutoHttpsCheckOutcome.Failed,
                     $"the CAA records on '{candidate}' permit {authority} only through validation methods that leave out " +
                     $"{method}, which is how this name is validated: {found}",
-                    $"add {method} to the record's validationmethods, or change PreferredChallengeType to a method it lists"),
+                    $"add {method} to the record's validationmethods, or change PreferredChallengeType to a method it lists. " +
+                    "Write the list in lowercase, separated by commas with no spaces and given once, for example " +
+                    "validationmethods=http-01,dns-01, because Let's Encrypt reads any other form as permitting nothing"),
                 CaaVerdict.ForbiddenAccount => new AutoHttpsCheck(
                     check,
                     AutoHttpsCheckOutcome.Failed,
@@ -595,7 +597,8 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
                     AutoHttpsCheckOutcome.Warning,
                     $"the CAA records on '{candidate}' carry a property marked critical that this check does not know, and " +
                     $"an authority that does not understand it must refuse to issue: {found}",
-                    "clear the critical flag (128) on that record unless every authority you use understands it"),
+                    "clear the critical flag (128, or 1, which Let's Encrypt also reads as critical) on that record " +
+                    "unless every authority you use understands it"),
                 _ => new AutoHttpsCheck(
                     check,
                     AutoHttpsCheckOutcome.Passed,

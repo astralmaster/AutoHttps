@@ -704,7 +704,7 @@ Every check is read only. What it looks at:
 | `account-binding` | Whether the authority requires external account binding and whether one is configured. |
 | `profile` | Whether the authority offers the profile you asked for. |
 | `dns:<name>` | Whether the name resolves, and whether the resolver answers `SERVFAIL`, which almost always means a broken DNSSEC chain. A missing AAAA record is reported as normal rather than as a problem, and so is a name with only an AAAA record. A name validated by `dns-01` does not need an address at all. |
-| `caa:<name>` | Whether CAA records permit this authority, following the record set on the closest ancestor that has one. It also reads the RFC 8657 `validationmethods` and `accounturi` parameters, which Let's Encrypt enforces, and reports a CAA lookup that fails with `SERVFAIL`, which an authority treats as a refusal. |
+| `caa:<name>` | Whether CAA records permit this authority, following the record set on the closest ancestor that has one. It also reads the RFC 8657 `validationmethods` and `accounturi` parameters, which Let's Encrypt enforces, and reports a CAA lookup that fails with `SERVFAIL`, which an authority treats as a refusal. Where the RFCs leave room it reads records as Let's Encrypt does: method names exactly as written, a parameter given twice as permitting nothing, and flag 1 as well as 128 as critical. |
 | `challenge-path:<name>` | Publishes a token of its own and fetches it back over the public name, which is the only check that exercises the whole path the authority takes. |
 
 The DNS and CAA checks need `DnsPropagationResolver` and are skipped without it, because AutoHttps makes

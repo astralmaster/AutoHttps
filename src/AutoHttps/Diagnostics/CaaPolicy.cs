@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 
 namespace AutoHttps.Diagnostics;
 
@@ -32,20 +33,27 @@ internal enum CaaVerdict
 /// <summary>
 /// Reads CAA records and decides whether they permit an authority to issue (RFC 8659), including the
 /// accounturi and validationmethods parameters of RFC 8657, which Let's Encrypt enforces and every
-/// publicly trusted authority must from 2027-03-15 (CA/Browser Forum ballot SC-098v2). This only
-/// reports; the authority does the authoritative check, and a client cannot see the same view of DNS
-/// that the authority's several validation perspectives do.
+/// publicly trusted authority must from 2027-03-15 (CA/Browser Forum ballot SC-098v2). Where the RFCs
+/// leave room, records are read the way Boulder, Let's Encrypt's server, reads them (va/caa.go), so a
+/// record it refuses is not reported as permitting. This only reports. The authority does the
+/// authoritative check, and a client cannot see the same view of DNS that the authority's several
+/// validation perspectives do.
 /// </summary>
 internal static class CaaPolicy
 {
     private const string Issue = "issue";
     private const string IssueWild = "issuewild";
-    private const int CriticalFlag = 128;
+    private const string ValidationMethods = "validationmethods";
+    private const string AccountUri = "accounturi";
 
-    // The tags in common use. An authority refuses on any other tag that is marked critical.
+    // Bit 7 (128) is the critical flag of RFC 8659. Boulder also treats bit 0 (1) as critical, because
+    // RFC 6844 numbered the bits the other way and records written to that reading exist.
+    private const int CriticalFlags = 128 | 1;
+
+    // The tags Boulder understands. It refuses on any other tag that is marked critical.
     private static readonly HashSet<string> KnownTags = new(StringComparer.OrdinalIgnoreCase)
     {
-        Issue, IssueWild, "iodef", "issuemail", "issuevmc", "contactemail", "contactphone",
+        Issue, IssueWild, "iodef", "issuemail", "issuevmc",
     };
 
     /// <summary>
@@ -76,7 +84,7 @@ internal static class CaaPolicy
 
             // RFC 8659 section 4.1: an authority must not issue when a property it does not understand is
             // marked critical, whatever the rest of the set says.
-            if ((flags & CriticalFlag) != 0 && !KnownTags.Contains(tag))
+            if ((flags & CriticalFlags) != 0 && !KnownTags.Contains(tag))
             {
                 return CaaVerdict.UnknownCritical;
             }
@@ -107,20 +115,28 @@ internal static class CaaPolicy
 
         foreach (string candidate in relevant)
         {
-            if (!TrySplit(candidate, out string domain, out Dictionary<string, string> parameters) ||
+            if (!TrySplit(candidate, out string domain, out List<KeyValuePair<string, string>> parameters) ||
                 !Names(domain, authorityIdentities))
             {
                 continue;
             }
 
-            if (parameters.TryGetValue("validationmethods", out string? methods) &&
-                !ListContains(methods, challengeType))
+            // A parameter given twice makes the record permit nothing, as at Boulder, rather than
+            // letting one of the two win.
+            if (!TryGetSingle(parameters, ValidationMethods, out string? methods) ||
+                (methods is not null && !MethodListPermits(methods, challengeType)))
             {
                 refusal = Prefer(refusal, CaaVerdict.ForbiddenMethod);
                 continue;
             }
 
-            if (parameters.TryGetValue("accounturi", out string? pinned))
+            if (!TryGetSingle(parameters, AccountUri, out string? pinned))
+            {
+                refusal = Prefer(refusal, CaaVerdict.ForbiddenAccount);
+                continue;
+            }
+
+            if (pinned is not null)
             {
                 if (accountUri is null)
                 {
@@ -171,11 +187,12 @@ internal static class CaaPolicy
 
     /// <summary>
     /// Splits an issue value into the authority's domain and its parameters (RFC 8659 section 4.2). An
-    /// empty domain is the ";" that forbids everyone, which names no authority.
+    /// empty domain is the ";" that forbids everyone, which names no authority. Parameter names are
+    /// kept as written: Boulder matches them case-sensitively, so <c>AccountURI</c> is not accounturi.
     /// </summary>
-    private static bool TrySplit(string value, out string domain, out Dictionary<string, string> parameters)
+    private static bool TrySplit(string value, out string domain, out List<KeyValuePair<string, string>> parameters)
     {
-        parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        parameters = [];
         string[] parts = value.Split(';', StringSplitOptions.TrimEntries);
 
         domain = parts[0];
@@ -185,11 +202,60 @@ internal static class CaaPolicy
             int equals = parts[i].IndexOf('=', StringComparison.Ordinal);
             if (equals > 0)
             {
-                parameters[parts[i][..equals].Trim()] = parts[i][(equals + 1)..].Trim();
+                parameters.Add(new(parts[i][..equals].Trim(), parts[i][(equals + 1)..].Trim()));
             }
         }
 
         return domain.Length > 0;
+    }
+
+    /// <summary>
+    /// Reads a parameter that may appear once. Returns false when it appears more than once, which
+    /// leaves the record unusable. Otherwise <paramref name="value"/> is its value, or null when absent.
+    /// </summary>
+    private static bool TryGetSingle(List<KeyValuePair<string, string>> parameters, string name, out string? value)
+    {
+        value = null;
+
+        foreach (KeyValuePair<string, string> parameter in parameters)
+        {
+            if (!string.Equals(parameter.Key, name, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (value is not null)
+            {
+                return false;
+            }
+
+            value = parameter.Value;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a validationmethods list permits the method in use. Boulder splits the list on commas
+    /// without trimming and compares exactly, and an entry that is not a method name (letters, digits
+    /// and hyphens) makes the whole list permit nothing, so "dns-01, http-01" with its space permits
+    /// neither method.
+    /// </summary>
+    private static bool MethodListPermits(string list, string method)
+    {
+        bool found = false;
+
+        foreach (string entry in list.Split(','))
+        {
+            if (entry.Length == 0 || !entry.All(static c => char.IsAsciiLetterOrDigit(c) || c == '-'))
+            {
+                return false;
+            }
+
+            found |= string.Equals(entry, method, StringComparison.Ordinal);
+        }
+
+        return found;
     }
 
     private static bool Names(string domain, IReadOnlyList<string> authorityIdentities)
@@ -197,19 +263,6 @@ internal static class CaaPolicy
         foreach (string identity in authorityIdentities)
         {
             if (string.Equals(domain, identity, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool ListContains(string list, string item)
-    {
-        foreach (string entry in list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (string.Equals(entry, item, StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
