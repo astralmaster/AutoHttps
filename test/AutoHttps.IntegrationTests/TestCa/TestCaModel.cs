@@ -147,6 +147,10 @@ internal sealed class TestCaBehavior
 
     public TimeSpan? RateLimitRetryAfter { get; set; }
 
+    /// <summary>Refuses this many orders with 400 rejectedIdentifier, as an authority's policy refusing
+    /// a name would.</summary>
+    public int RejectNextOrdersCount { get; set; }
+
     public bool AdvertiseRenewalInfo { get; set; } = true;
 
     public bool AdvertiseProfiles { get; set; } = true;

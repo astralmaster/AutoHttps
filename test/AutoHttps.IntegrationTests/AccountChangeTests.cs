@@ -55,6 +55,28 @@ public sealed class AccountChangeTests
         AssertRecoveredByDroppingTheHint(authority, second, original, renewed);
     }
 
+    [Fact]
+    public async Task ARefusedRenewalIsNotOrderedAgainWhenNoHintWasSent()
+    {
+        // Ordering again without the hint only helps when the hint was sent. An authority that does not
+        // advertise renewalInfo never receives it, so its refusal is about something else, and ordering
+        // again repeats the same request and reports an account change that never happened.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        authority.Behavior.CertificateLifetime = TimeSpan.FromMinutes(10);
+        authority.Behavior.AdvertiseRenewalInfo = false;
+
+        string original = await IssueAsync(authority, storage, "operator@example.com");
+        authority.Behavior.RejectNextOrdersCount = 1;
+
+        await using TestApplication second = await StartDueAsync(authority, storage, "operator@example.com");
+        await second.WaitForCertificateChangeAsync("app.example.com", original, IssuanceTimeout);
+
+        Assert.False(authority.SawReplaces);
+        Assert.Equal(0, second.Log.CountOf(148));
+        Assert.True(second.Log.CountOf(110) > 0, "The refused order was not reported as a failed attempt." + Environment.NewLine + second.Log.Describe());
+    }
+
     private static async Task<string> IssueAsync(TestCertificateAuthority authority, TempStorage storage, string email)
     {
         await using TestApplication first = await TestApplication.StartAsync(authority, options =>

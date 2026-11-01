@@ -119,7 +119,9 @@ internal sealed class CertificateAcquirer
     /// it was issued to a different account, and malformed or not found when the authority cannot
     /// match it. The account changes with the email address or a lost account key while the stored
     /// certificate stays, so the second case is an ordinary operation, not an edge case. Each would
-    /// fail the same way on every attempt and the certificate would never be replaced.
+    /// fail the same way on every attempt and the certificate would never be replaced. An authority
+    /// that does not take the field never receives it, so its refusal is about something else and
+    /// ordering again would only repeat it.
     /// </summary>
     private async Task<AcmeOrder> CreateOrderAsync(
         AcmeClient client,
@@ -127,15 +129,19 @@ internal sealed class CertificateAcquirer
         string? replacesCertificateId,
         CancellationToken cancellationToken)
     {
+        string? hint = replacesCertificateId is not null && await client.AcceptsRenewalHintAsync(cancellationToken)
+            ? replacesCertificateId
+            : null;
+
         try
         {
             return await client.CreateOrderAsync(
                 [.. identifiers.Select(CreateIdentifier)],
                 _options.Profile,
-                replacesCertificateId,
+                hint,
                 cancellationToken);
         }
-        catch (AcmeException ex) when (replacesCertificateId is not null && IsRenewalRefused(ex))
+        catch (AcmeException ex) when (hint is not null && IsRenewalRefused(ex))
         {
             if (ex.ErrorType == AcmeErrorTypes.AlreadyReplaced)
             {

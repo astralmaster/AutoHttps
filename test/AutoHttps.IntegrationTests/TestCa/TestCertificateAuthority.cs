@@ -445,6 +445,17 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
             return;
         }
 
+        if (Behavior.RejectNextOrdersCount > 0)
+        {
+            Behavior.RejectNextOrdersCount--;
+            await WriteProblemAsync(
+                context,
+                StatusCodes.Status400BadRequest,
+                "urn:ietf:params:acme:error:rejectedIdentifier",
+                "Policy forbids issuing for this name.");
+            return;
+        }
+
         using JsonDocument payload = JsonDocument.Parse(request.Payload);
         JsonElement root = payload.RootElement;
 

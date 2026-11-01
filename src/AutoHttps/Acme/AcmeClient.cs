@@ -103,6 +103,16 @@ internal sealed class AcmeClient
         return true;
     }
 
+    /// <summary>
+    /// Whether an order may carry the replaces field, which RFC 9773 section 5 limits to authorities
+    /// that advertise renewalInfo. <see cref="CreateOrderAsync"/> drops the field for any other.
+    /// </summary>
+    public async Task<bool> AcceptsRenewalHintAsync(CancellationToken cancellationToken)
+    {
+        AcmeDirectory directory = await _http.GetDirectoryAsync(cancellationToken);
+        return directory.RenewalInfo is not null;
+    }
+
     public async Task<AcmeOrder> CreateOrderAsync(
         IReadOnlyList<AcmeIdentifier> identifiers,
         string? profile,
