@@ -177,6 +177,66 @@ public sealed class AccountChangeTests
         Assert.Contains(app.Log.Entries, entry => entry.Contains(accountUrl.AbsoluteUri, StringComparison.Ordinal) && entry.Contains("[157]", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task TheAccountUrlIsKnownAfterARestartWithoutAnOrder()
+    {
+        // After a deploy the stored certificate is loaded and nothing is ordered for weeks. The account
+        // URL, which a CAA accounturi has to name, must not stay unknown all that time.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        await IssueAsync(authority, storage, "operator@example.com");
+        int lookups = authority.AccountLookups;
+
+        await using TestApplication restarted = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+        });
+
+        IAutoHttpsCertificateInspector inspector = restarted.Services.GetRequiredService<IAutoHttpsCertificateInspector>();
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(15);
+        while (inspector.GetStatus().AccountUrl is null && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(100);
+        }
+
+        Assert.NotNull(inspector.GetStatus().AccountUrl);
+        Assert.Equal(1, restarted.Log.CountOf(157));
+
+        // Found, not registered, and nothing ordered.
+        Assert.True(authority.AccountLookups > lookups);
+        Assert.Equal(1, authority.AccountCount);
+        Assert.Equal(1, authority.OrderCount);
+    }
+
+    [Fact]
+    public async Task NoAccountIsRegisteredAtStartupWhenNoneIsStored()
+    {
+        // Looking the account up at startup must not turn into registering one: an application whose
+        // stored certificate came from elsewhere, with no account key, orders nothing until it is due.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        await IssueAsync(authority, storage, "operator@example.com");
+        foreach (string accountKey in Directory.GetFiles(storage.Path, "*.account.pem"))
+        {
+            File.Delete(accountKey);
+        }
+
+        await using TestApplication restarted = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+        });
+
+        await Task.Delay(TimeSpan.FromSeconds(3));
+
+        Assert.Null(restarted.Services.GetRequiredService<IAutoHttpsCertificateInspector>().GetStatus().AccountUrl);
+        Assert.Equal(1, authority.AccountCount);
+        Assert.Empty(Directory.GetFiles(storage.Path, "*.account.pem"));
+    }
+
     private static async Task<string> IssueAsync(TestCertificateAuthority authority, TempStorage storage, string email)
     {
         await using TestApplication first = await TestApplication.StartAsync(authority, options =>

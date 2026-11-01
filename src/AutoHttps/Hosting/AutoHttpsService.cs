@@ -38,6 +38,7 @@ internal sealed class AutoHttpsService : BackgroundService
     private readonly DevelopmentCertificateSource _developmentCertificate;
     private readonly IAutoHttpsDiagnostics _diagnostics;
     private readonly RenewalRequests _requests;
+    private readonly AcmeSession _session;
 
     private readonly TaskCompletionSource _firstCertificate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -72,7 +73,8 @@ internal sealed class AutoHttpsService : BackgroundService
         IHostEnvironment environment,
         DevelopmentCertificateSource developmentCertificate,
         IAutoHttpsDiagnostics diagnostics,
-        RenewalRequests requests)
+        RenewalRequests requests,
+        AcmeSession session)
     {
         _options = options.Value;
         _acquirer = acquirer;
@@ -89,6 +91,7 @@ internal sealed class AutoHttpsService : BackgroundService
         _developmentCertificate = developmentCertificate;
         _diagnostics = diagnostics;
         _requests = requests;
+        _session = session;
     }
 
     /// <summary>
@@ -128,6 +131,14 @@ internal sealed class AutoHttpsService : BackgroundService
             if (_options.RequireCertificateOnStartup && _current is null)
             {
                 _ = WatchStartupCertificateAsync(description, stoppingToken);
+            }
+
+            // With a certificate loaded nothing may be ordered for weeks, and the account's URL, which a
+            // CAA accounturi has to name, would stay unknown all that time. Without one, the first order
+            // finds or registers the account straight away anyway.
+            if (_current is not null)
+            {
+                _ = FindStoredAccountAsync(stoppingToken);
             }
 
             _nextRetry = _options.InitialRetryDelay;
@@ -860,6 +871,22 @@ internal sealed class AutoHttpsService : BackgroundService
         }
         catch (OperationCanceledException)
         {
+        }
+    }
+
+    /// <summary>Runs alongside the loop and never affects it: a failed lookup leaves the URL to the next order.</summary>
+    private async Task FindStoredAccountAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _session.FindStoredAccountAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log.StoredAccountNotFoundAtStartup(_logger, ex);
         }
     }
 

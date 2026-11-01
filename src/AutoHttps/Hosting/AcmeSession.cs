@@ -83,6 +83,41 @@ internal sealed class AcmeSession : IDisposable
     }
 
     /// <summary>
+    /// Finds the account a stored key belongs to without registering one, so its URL is known before
+    /// the next order, which after a restart can be weeks away. Does nothing when no key is stored or
+    /// the account is already known, and leaves an authority that refuses the lookup to the next order.
+    /// </summary>
+    public async Task FindStoredAccountAsync(CancellationToken cancellationToken)
+    {
+        if (AccountUrl is not null)
+        {
+            return;
+        }
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            AcmeClient client = _client ?? await CreateClientAsync(cancellationToken);
+            Volatile.Write(ref _client, client);
+
+            if (!_keyFromStore || _registered)
+            {
+                return;
+            }
+
+            if (await FindAccountAsync(client, cancellationToken))
+            {
+                Volatile.Write(ref _registered, true);
+                AnnounceAccount(client.AccountUrl);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
     /// Forgets that the account was registered, so the next request registers again with the same
     /// key. Used when the authority stops recognising the account (accountDoesNotExist), which happens
     /// if the endpoint moved or the authority lost the registration. A deactivated account is not that

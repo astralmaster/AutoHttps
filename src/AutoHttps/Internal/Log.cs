@@ -327,4 +327,10 @@ internal static partial class Log
         Message = "The application asked for a new certificate for {Domains}, so one is being ordered now whatever " +
                   "the renewal schedule says.")]
     public static partial void RenewalRequested(ILogger logger, string domains);
+
+    [LoggerMessage(
+        EventId = 161,
+        Level = LogLevel.Debug,
+        Message = "Could not look up the stored ACME account at startup. Its URL is known once the next order runs.")]
+    public static partial void StoredAccountNotFoundAtStartup(ILogger logger, Exception exception);
 }
