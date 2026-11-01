@@ -69,17 +69,58 @@ public sealed class Route53DnsChallengeProviderTests
     }
 
     [Fact]
-    public async Task ZoneLookupsAreRememberedIncludingTheNamesThatAreNotZones()
+    public async Task AFoundZoneIsRememberedWhileANameThatIsNotAZoneIsAskedAgain()
     {
         var route53 = new FakeRoute53 { ZoneResolver = name => name == "example.com" ? "zoneX" : null };
         Route53DnsChallengeProvider provider = Provider(route53, _ => { });
 
         await provider.CreateTxtRecordAsync("_acme-challenge.sub.example.com", "one", CancellationToken.None);
-        int afterFirst = route53.ZoneQueries.Count;
         await provider.CreateTxtRecordAsync("_acme-challenge.sub.example.com", "two", CancellationToken.None);
 
-        Assert.Equal(["sub.example.com", "example.com"], route53.ZoneQueries.Take(afterFirst).ToArray());
-        Assert.Equal(afterFirst, route53.ZoneQueries.Count);
+        Assert.Equal(["sub.example.com", "example.com", "sub.example.com"], route53.ZoneQueries.ToArray());
+    }
+
+    [Fact]
+    public async Task AZoneThatWasNotFoundIsLookedUpAgain()
+    {
+        // A hosted zone created after the deploy, or a permission granted later, has to be found by the
+        // next attempt. A miss remembered for the life of the process failed every later order until a
+        // restart, without asking Route 53 again.
+        string? zone = null;
+        var route53 = new FakeRoute53 { ZoneResolver = name => name == "example.com" ? zone : null };
+        Route53DnsChallengeProvider provider = Provider(route53, _ => { });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.CreateTxtRecordAsync(Name, "one", CancellationToken.None));
+
+        zone = "zoneX";
+        await provider.CreateTxtRecordAsync(Name, "two", CancellationToken.None);
+
+        Assert.NotNull(route53.Current("zoneX", Name));
+    }
+
+    [Fact]
+    public async Task ASubdomainDelegatedLaterGetsItsOwnZone()
+    {
+        string? subzone = null;
+        var route53 = new FakeRoute53
+        {
+            ZoneResolver = name => name switch
+            {
+                "example.com" => "zoneX",
+                "dev.example.com" => subzone,
+                _ => null,
+            },
+        };
+        Route53DnsChallengeProvider provider = Provider(route53, _ => { });
+
+        await provider.CreateTxtRecordAsync("_acme-challenge.dev.example.com", "one", CancellationToken.None);
+        Assert.NotNull(route53.Current("zoneX", "_acme-challenge.dev.example.com"));
+
+        subzone = "zoneDev";
+        await provider.CreateTxtRecordAsync("_acme-challenge.dev.example.com", "two", CancellationToken.None);
+
+        Assert.NotNull(route53.Current("zoneDev", "_acme-challenge.dev.example.com"));
     }
 
     [Fact]

@@ -23,7 +23,7 @@ public sealed class Route53DnsChallengeProvider : IDnsChallengeProvider
     private readonly IRoute53Client _client;
     private readonly Route53DnsOptions _options;
     private readonly TimeProvider _time;
-    private readonly ConcurrentDictionary<string, string?> _zoneIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _zoneIds = new(StringComparer.OrdinalIgnoreCase);
 
     internal Route53DnsChallengeProvider(IRoute53Client client, IOptions<Route53DnsOptions> options, TimeProvider? time = null)
     {
@@ -133,25 +133,18 @@ public sealed class Route53DnsChallengeProvider : IDnsChallengeProvider
         // Most specific first, from the cache or the API alike. Taking any cached zone that contains the
         // name would answer dev.example.com with example.com once that was cached, even where
         // dev.example.com is a hosted zone of its own, and the record would land where no resolver looks.
+        // Only zones that were found are remembered. A name that is not a zone today can become one, and
+        // a zone created or made visible after a failed lookup has to be found by the next attempt.
         foreach (string candidate in Suffixes(domain))
         {
             if (_zoneIds.TryGetValue(candidate, out string? cached))
             {
-                if (cached is not null)
-                {
-                    return cached;
-                }
-
-                continue;
+                return cached;
             }
 
-            string? zoneId = await _client.FindZoneIdAsync(candidate, cancellationToken);
-
-            // A miss is remembered too, so each later lookup does not ask about it again.
-            _zoneIds[candidate] = zoneId;
-
-            if (zoneId is not null)
+            if (await _client.FindZoneIdAsync(candidate, cancellationToken) is { } zoneId)
             {
+                _zoneIds[candidate] = zoneId;
                 return zoneId;
             }
         }

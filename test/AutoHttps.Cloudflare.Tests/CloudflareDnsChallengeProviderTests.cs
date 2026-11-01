@@ -103,7 +103,7 @@ public sealed class CloudflareDnsChallengeProviderTests
     }
 
     [Fact]
-    public async Task ZoneLookupsAreRememberedIncludingTheNamesThatAreNotZones()
+    public async Task AFoundZoneIsRememberedWhileANameThatIsNotAZoneIsAskedAgain()
     {
         var api = new StubApi
         {
@@ -123,7 +123,39 @@ public sealed class CloudflareDnsChallengeProviderTests
         await provider.CreateTxtRecordAsync("_acme-challenge.sub.example.com", "one", CancellationToken.None);
         await provider.CreateTxtRecordAsync("_acme-challenge.sub.example.com", "two", CancellationToken.None);
 
-        Assert.Equal(2, api.Count(r => r.Method == "GET" && r.Path.Contains("zones?name=", StringComparison.Ordinal)));
+        Assert.Equal(2, api.Count(r => r.Method == "GET" && r.Path.EndsWith("zones?name=sub.example.com", StringComparison.Ordinal)));
+        Assert.Equal(1, api.Count(r => r.Method == "GET" && r.Path.EndsWith("zones?name=example.com", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task AZoneThatWasNotFoundIsLookedUpAgain()
+    {
+        // A token given access to the zone after the deploy, or a zone added later, has to be found by the
+        // next attempt. A miss remembered for the life of the process failed every later order until a
+        // restart, without asking Cloudflare again.
+        bool zoneVisible = false;
+        var api = new StubApi
+        {
+            Responder = (request, _) =>
+            {
+                string path = request.RequestUri!.PathAndQuery;
+                if (request.Method == HttpMethod.Get && path.EndsWith("zones?name=example.com", StringComparison.Ordinal))
+                {
+                    return (200, Success(zoneVisible ? """[{"id":"zoneX","name":"example.com"}]""" : "[]"));
+                }
+
+                return request.Method == HttpMethod.Get ? (200, Success("[]")) : (200, Success("""{"id":"rec1"}"""));
+            },
+        };
+        CloudflareDnsChallengeProvider provider = Provider(api, o => o.ApiToken = Token);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.CreateTxtRecordAsync("_acme-challenge.example.com", "one", CancellationToken.None));
+
+        zoneVisible = true;
+        await provider.CreateTxtRecordAsync("_acme-challenge.example.com", "two", CancellationToken.None);
+
+        Assert.Equal(1, api.Count(r => r.Method == "POST" && r.Path.Contains("zones/zoneX/dns_records", StringComparison.Ordinal)));
     }
 
     [Fact]
