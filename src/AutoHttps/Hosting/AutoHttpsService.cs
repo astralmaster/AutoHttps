@@ -111,18 +111,18 @@ internal sealed class AutoHttpsService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!await (_preparation ??= PrepareAsync()))
-        {
-            _requests.Close(new InvalidOperationException(_notManaged));
-            return;
-        }
-
-        string storeName = _storeName;
-        string description = string.Join(", ", _domains);
-        IReadOnlyList<string> domains = _domains;
-
         try
         {
+            if (!await (_preparation ??= PrepareAsync()))
+            {
+                _requests.Close(new InvalidOperationException(_notManaged));
+                return;
+            }
+
+            string storeName = _storeName;
+            string description = string.Join(", ", _domains);
+            IReadOnlyList<string> domains = _domains;
+
             await WaitForApplicationStartedAsync(stoppingToken);
 
             if (_options.RequireCertificateOnStartup && _current is null)

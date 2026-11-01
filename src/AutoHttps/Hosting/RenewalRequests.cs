@@ -113,17 +113,18 @@ internal sealed class RenewalRequests
 
     /// <summary>
     /// Ends every pending request and refuses later ones with <paramref name="reason"/>, for when the
-    /// loop will not act on them: nothing is ordered in this process, or the host is stopping.
+    /// loop will not act on them: nothing is ordered in this process, or the host is stopping. The
+    /// first reason is kept, because the loop also closes on the way out whatever stopped it.
     /// </summary>
     public void Close(Exception reason)
     {
         lock (_gate)
         {
-            _closed = reason;
+            _closed ??= reason;
 
             foreach (Request request in _pending)
             {
-                request.Completion.TrySetException(reason);
+                request.Completion.TrySetException(_closed);
             }
 
             _pending.Clear();
