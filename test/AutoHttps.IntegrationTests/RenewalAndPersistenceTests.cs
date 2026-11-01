@@ -126,6 +126,42 @@ public class RenewalAndPersistenceTests
     }
 
     [Fact]
+    public async Task RemovingTheStoredCertificateOrdersANewOneAndServesTheOldOneMeanwhile()
+    {
+        // Removing the stored certificate is how an operator forces a new one, for example after a key
+        // compromise. The copy kept for a change of names must not quietly bring the old one back as if
+        // nothing had happened, and the names must not drop to the fallback while the new one is ordered.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        string original;
+        await using (TestApplication first = await TestApplication.StartAsync(authority, Configure(storage)))
+        {
+            original = (await first.WaitForCertificateAsync("app.example.com", IssuanceTimeout)).Leaf.Thumbprint;
+        }
+
+        foreach (string file in Stored(storage, "*.crt.pem").Concat(Stored(storage, "*.key.pem")))
+        {
+            File.Delete(file);
+        }
+
+        await using TestApplication second = await TestApplication.StartAsync(authority, Configure(storage));
+
+        // The first handshake gets a trusted certificate, the old one or already the new one, never the
+        // self-signed fallback.
+        TlsHandshakeResult handshake = await second.HandshakeAsync(
+            "app.example.com", authority.RootCertificate, knownIntermediate: authority.IntermediateCertificate);
+        Assert.True(handshake.ChainIsTrusted, second.Log.Describe());
+
+        ServerCertificate replaced = await second.WaitForCertificateChangeAsync(
+            "app.example.com", original, TimeSpan.FromSeconds(30));
+
+        Assert.NotEqual(original, replaced.Leaf.Thumbprint);
+        Assert.Equal(2, authority.OrderCount);
+        Assert.Equal(1, second.Log.CountOf(156));
+    }
+
+    [Fact]
     public async Task TheCertificateIsOnDiskBeforeItIsEverServed()
     {
         using var storage = new TempStorage();

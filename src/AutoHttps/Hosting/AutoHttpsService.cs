@@ -45,6 +45,7 @@ internal sealed class AutoHttpsService : BackgroundService
     private string _storeName = string.Empty;
     private string _latestName = string.Empty;
     private string? _keyMismatchReported;
+    private string? _replaceThumbprint;
     private DateTimeOffset _loggedRenewal;
     private DateTimeOffset _lastIssued;
     private TimeSpan _nextRetry;
@@ -377,11 +378,11 @@ internal sealed class AutoHttpsService : BackgroundService
         CancellationToken cancellationToken)
     {
         ServerCertificate? current = _current;
-        if (current is null || !MatchesConfiguration(current))
+        if (current is null || !MatchesConfiguration(current) || IsBeingReplaced(current))
         {
-            // A certificate that leaves out a configured name, or has a key of a different kind than
-            // configured, is only being served until one that matches is issued, so it is due now
-            // whatever its own schedule says.
+            // A certificate that leaves out a configured name, has a key of a different kind than
+            // configured, or is being replaced on purpose is only served until its replacement is
+            // issued, so it is due now whatever its own schedule says.
             return (now, null);
         }
 
@@ -442,7 +443,7 @@ internal sealed class AutoHttpsService : BackgroundService
 
     private bool IsDue(ServerCertificate? certificate)
     {
-        if (certificate is null || !MatchesConfiguration(certificate))
+        if (certificate is null || !MatchesConfiguration(certificate) || IsBeingReplaced(certificate))
         {
             return true;
         }
@@ -567,6 +568,16 @@ internal sealed class AutoHttpsService : BackgroundService
         }
 
         Publish(candidate);
+
+        if (covered.Length == _domains.Count && candidate.SubjectNames.Count == _domains.Count)
+        {
+            // Exactly the configured names, so this is the certificate that was filed under them and
+            // is no longer in the store. Removing it is how a new one is forced, for example after a
+            // key compromise, so it is served only until the replacement ordered now arrives.
+            _replaceThumbprint = candidate.Leaf.Thumbprint;
+            Log.StoredCertificateRemoved(_logger, description);
+            return;
+        }
 
         if (covered.Length == _domains.Count)
         {
@@ -909,6 +920,9 @@ internal sealed class AutoHttpsService : BackgroundService
 
         return message.EndsWith('.') ? message : message + ".";
     }
+
+    private bool IsBeingReplaced(ServerCertificate certificate) =>
+        string.Equals(certificate.Leaf.Thumbprint, _replaceThumbprint, StringComparison.Ordinal);
 
     private static bool IsSameCertificate(ServerCertificate? left, ServerCertificate right) =>
         left is not null && string.Equals(left.Leaf.Thumbprint, right.Leaf.Thumbprint, StringComparison.Ordinal);

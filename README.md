@@ -604,6 +604,7 @@ exists for diagnosis, not alerting.
 | 151 | Information | `KeyAlgorithm` changed, so the certificate in use is being replaced. It is served until the new one arrives. |
 | 154 | Information | Certificates are kept in a store other instances can share, but the lock is still a local file. Fine for one instance, while several need `UseDistributedLock`. Logged once at startup. |
 | 155 | Information | The authority explained the renewal window it set, typically because it moved renewal forward for a revocation. The message carries the URL. Logged once per URL. |
+| 156 | Information | The stored certificate for the configured names was removed, so a new one is being ordered. The previous certificate is served until it arrives. |
 | 110 | Warning | An order failed and will be retried. The reason is in the message; the stack trace is logged separately at Debug as event 124. |
 | 112 | Warning | A self-signed fallback is being served, logged once rather than per handshake. |
 | 114 | Warning | The store could not be read; continuing without a cached certificate. |
@@ -813,7 +814,8 @@ none. `RevokeAsync` takes a specific `X509Certificate2`. The request is signed w
 key, and event 138 records it. Revocation only tells the authority the certificate is no longer valid.
 AutoHttps keeps serving its local copy and does not order a replacement on its own, so this fits
 decommissioning a certificate. To move an instance onto a fresh one, remove the stored certificate and
-restart.
+restart. AutoHttps then orders a new certificate at once (event 156) and serves the previous one until
+it arrives, so the names do not drop to the fallback meanwhile.
 
 ## Not in scope
 

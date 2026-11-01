@@ -300,4 +300,11 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "The certificate authority set the renewal window to {Start:u} to {End:u} and explains why at {ExplanationUrl}.")]
     public static partial void RenewalWindowExplained(ILogger logger, DateTimeOffset start, DateTimeOffset end, Uri explanationUrl);
+
+    [LoggerMessage(
+        EventId = 156,
+        Level = LogLevel.Information,
+        Message = "The stored certificate for {Domains} is gone, and removing it is how a new one is forced, so " +
+                  "one is being ordered now. The previous certificate is served until it arrives.")]
+    public static partial void StoredCertificateRemoved(ILogger logger, string domains);
 }
