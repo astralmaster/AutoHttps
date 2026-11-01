@@ -14,18 +14,48 @@ internal sealed class AutoHttpsCertificateManager : IAutoHttpsCertificateManager
     private readonly AcmeSession _session;
     private readonly CertificateSelector _selector;
     private readonly AutoHttpsState _state;
+    private readonly RenewalRequests _requests;
     private readonly ILogger<AutoHttpsCertificateManager> _logger;
 
     public AutoHttpsCertificateManager(
         AcmeSession session,
         CertificateSelector selector,
         AutoHttpsState state,
+        RenewalRequests requests,
         ILogger<AutoHttpsCertificateManager> logger)
     {
         _session = session;
         _selector = selector;
         _state = state;
+        _requests = requests;
         _logger = logger;
+    }
+
+    public async Task RenewAsync(RevocationReason? revokePrevious = null, CancellationToken cancellationToken = default)
+    {
+        // Taken before asking, because the certificate is replaced, and later disposed, while this waits.
+        ServerCertificate? current = FindCurrent();
+        string? replacing = current?.Leaf.Thumbprint;
+        byte[]? previous = revokePrevious is not null ? current?.Leaf.RawData : null;
+
+        Task replaced = _requests.RequestAsync(replacing, cancellationToken);
+
+        // A request refused at once, for example because a development certificate is served and
+        // nothing is ordered, is not reported as an order starting.
+        if (!replaced.IsFaulted)
+        {
+            string domains = string.Join(", ", _state.Current.Domains);
+            Log.RenewalRequested(_logger, domains);
+        }
+
+        await replaced;
+
+        if (previous is not null && revokePrevious is { } reason)
+        {
+            AcmeClient client = await _session.GetClientAsync(requireAccount: true, cancellationToken);
+            await client.RevokeCertificateAsync(previous, (int)reason, cancellationToken);
+            Log.CertificateRevoked(_logger, replacing!, reason);
+        }
     }
 
     public async Task RevokeAsync(

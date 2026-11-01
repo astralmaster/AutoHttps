@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
@@ -36,6 +37,7 @@ internal sealed class AutoHttpsService : BackgroundService
     private readonly IHostEnvironment _environment;
     private readonly DevelopmentCertificateSource _developmentCertificate;
     private readonly IAutoHttpsDiagnostics _diagnostics;
+    private readonly RenewalRequests _requests;
 
     private readonly TaskCompletionSource _firstCertificate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -50,6 +52,8 @@ internal sealed class AutoHttpsService : BackgroundService
     private DateTimeOffset _lastIssued;
     private TimeSpan _nextRetry;
     private DateTimeOffset _rateLimitedUntil;
+    private AcmeRateLimitException? _rateLimit;
+    private string? _notManaged;
     private int _diagnosed;
     private bool _overdueReported;
 
@@ -67,7 +71,8 @@ internal sealed class AutoHttpsService : BackgroundService
         AutoHttpsMetrics metrics,
         IHostEnvironment environment,
         DevelopmentCertificateSource developmentCertificate,
-        IAutoHttpsDiagnostics diagnostics)
+        IAutoHttpsDiagnostics diagnostics,
+        RenewalRequests requests)
     {
         _options = options.Value;
         _acquirer = acquirer;
@@ -83,6 +88,7 @@ internal sealed class AutoHttpsService : BackgroundService
         _environment = environment;
         _developmentCertificate = developmentCertificate;
         _diagnostics = diagnostics;
+        _requests = requests;
     }
 
     /// <summary>
@@ -107,6 +113,7 @@ internal sealed class AutoHttpsService : BackgroundService
     {
         if (!await (_preparation ??= PrepareAsync()))
         {
+            _requests.Close(new InvalidOperationException(_notManaged));
             return;
         }
 
@@ -114,34 +121,43 @@ internal sealed class AutoHttpsService : BackgroundService
         string description = string.Join(", ", _domains);
         IReadOnlyList<string> domains = _domains;
 
-        await WaitForApplicationStartedAsync(stoppingToken);
-
-        if (_options.RequireCertificateOnStartup && _current is null)
+        try
         {
-            _ = WatchStartupCertificateAsync(description, stoppingToken);
+            await WaitForApplicationStartedAsync(stoppingToken);
+
+            if (_options.RequireCertificateOnStartup && _current is null)
+            {
+                _ = WatchStartupCertificateAsync(description, stoppingToken);
+            }
+
+            _nextRetry = _options.InitialRetryDelay;
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                // Nothing in here may escape. A background service that throws takes the whole host down
+                // with it by default, and losing the application because a certificate could not be
+                // renewed is far worse than continuing to serve the certificate already in hand.
+                try
+                {
+                    await RunOnceAsync(domains, storeName, description, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Log.UnexpectedFailure(_logger, description, _nextRetry, ex);
+                    _requests.Failed(ex);
+                    await DelayAsync(JitterRetry(), stoppingToken);
+                    _nextRetry = Min(_nextRetry + _nextRetry, RetryCeiling());
+                }
+            }
         }
-
-        _nextRetry = _options.InitialRetryDelay;
-
-        while (!stoppingToken.IsCancellationRequested)
+        finally
         {
-            // Nothing in here may escape. A background service that throws takes the whole host down
-            // with it by default, and losing the application because a certificate could not be
-            // renewed is far worse than continuing to serve the certificate already in hand.
-            try
-            {
-                await RunOnceAsync(domains, storeName, description, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                Log.UnexpectedFailure(_logger, description, _nextRetry, ex);
-                await DelayAsync(JitterRetry(), stoppingToken);
-                _nextRetry = Min(_nextRetry + _nextRetry, RetryCeiling());
-            }
+            // Nothing acts on a request after this, so one still waiting would never end.
+            _requests.Close(new OperationCanceledException("AutoHttps is stopping, so the certificate was not replaced."));
         }
     }
 
@@ -155,6 +171,7 @@ internal sealed class AutoHttpsService : BackgroundService
         IReadOnlyList<string> domains = DomainNormalizer.Normalize(_options.DomainNames);
         if (domains.Count == 0)
         {
+            _notManaged = "AutoHttps is not managing a certificate, because no domain names are configured.";
             return false;
         }
 
@@ -174,6 +191,7 @@ internal sealed class AutoHttpsService : BackgroundService
         if (_developmentCertificate.IsEnabled && _environment.IsDevelopment())
         {
             ServeDevelopmentCertificate(description);
+            _notManaged = "AutoHttps orders no certificates in this process, because a development certificate is being served.";
             return false;
         }
 
@@ -209,10 +227,16 @@ internal sealed class AutoHttpsService : BackgroundService
         string description,
         CancellationToken stoppingToken)
     {
+        _requests.Acknowledge();
         _selector.CollectRetired();
 
+        // A request from RenewAsync makes the certificate due now, whatever its schedule says.
+        bool requested = _requests.HasPending;
+
         DateTimeOffset now = _time.GetUtcNow();
-        (DateTimeOffset renewAt, DateTimeOffset? recheckAt) = await ComputeRenewalTimeAsync(now, stoppingToken);
+        (DateTimeOffset renewAt, DateTimeOffset? recheckAt) = requested
+            ? (now, null)
+            : await ComputeRenewalTimeAsync(now, stoppingToken);
 
         if (renewAt > now)
         {
@@ -230,11 +254,23 @@ internal sealed class AutoHttpsService : BackgroundService
 
         if (_rateLimitedUntil > now)
         {
+            // The authority asked for nothing before this time, and a request cannot change that, so it
+            // is answered now with the same reason rather than held for up to an hour.
+            if (requested)
+            {
+                _requests.Failed(_rateLimit ?? new AcmeRateLimitException(
+                    string.Create(CultureInfo.InvariantCulture, $"The certificate authority asked for no requests before {_rateLimitedUntil:u}."),
+                    detail: null,
+                    _rateLimitedUntil));
+            }
+
             await DelayAsync(Min(_rateLimitedUntil - now, MaxRateLimitWait), stoppingToken);
             return;
         }
 
-        if (TryGetIssueThrottle(now, out TimeSpan throttle))
+        // The throttle stops a configuration that makes every new certificate due at once from ordering
+        // in a loop. A request from the application is not that loop, so it is not held back.
+        if (!requested && TryGetIssueThrottle(now, out TimeSpan throttle))
         {
             Log.RenewalThrottled(_logger, description, throttle);
             await DelayAsync(throttle, stoppingToken);
@@ -352,6 +388,7 @@ internal sealed class AutoHttpsService : BackgroundService
                 {
                     DateTimeOffset deadline = RateLimit.ClampDeadline(retryAfter, now, _current?.NotAfter, MaxRateLimitWait);
                     _rateLimitedUntil = deadline;
+                    _rateLimit = ex;
 
                     if (deadline < retryAfter)
                     {
@@ -448,7 +485,8 @@ internal sealed class AutoHttpsService : BackgroundService
 
     private bool IsDue(ServerCertificate? certificate)
     {
-        if (certificate is null || !MatchesConfiguration(certificate) || IsBeingReplaced(certificate))
+        if (certificate is null || !MatchesConfiguration(certificate) || IsBeingReplaced(certificate) ||
+            _requests.IsRequested(certificate.Leaf.Thumbprint))
         {
             return true;
         }
@@ -783,6 +821,7 @@ internal sealed class AutoHttpsService : BackgroundService
         _selector.Publish(certificate);
         _loggedRenewal = default;
         _firstCertificate.TrySetResult();
+        _requests.Published(certificate.Leaf.Thumbprint);
     }
 
     /// <summary>
@@ -841,6 +880,10 @@ internal sealed class AutoHttpsService : BackgroundService
         DateTimeOffset now = _time.GetUtcNow();
         _state.OrderFailed(now, reason);
         _metrics.RecordFailure();
+
+        // A request ends with the attempt it caused. The caller decides whether to ask again, and the
+        // certificate in use goes back to its own schedule rather than being retried on its behalf.
+        _requests.Failed(exception);
 
         ReportOverdue(now, reason);
 
@@ -960,15 +1003,19 @@ internal sealed class AutoHttpsService : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Waits, and wakes early when the host stops or the application asks for a new certificate.
+    /// </summary>
     private async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
     {
-        try
-        {
-            await Task.Delay(delay, _time, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-        }
+        using var timer = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task elapsed = Task.Delay(delay, _time, timer.Token);
+
+        await Task.WhenAny(elapsed, _requests.WhenRequested);
+
+        // Stops the timer when a request ended the wait. A cancelled delay that nobody awaits is not an
+        // unobserved exception.
+        await timer.CancelAsync();
     }
 
     /// <summary>

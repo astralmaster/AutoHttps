@@ -482,6 +482,35 @@ public class PebbleIssuanceTests
         return intermediates[intermediates.Count - 1].GetNameInfo(X509NameType.SimpleName, forIssuer: true);
     }
 
+    [Fact]
+    public async Task ReplacesTheCertificateOnDemandAndRevokesThePreviousOne()
+    {
+        using var storage = new TempStorage();
+        string domain = NewDomain();
+
+        await using PebbleApplication app = await PebbleApplication.StartAsync(_pebble, options =>
+        {
+            options.DomainNames.Add(domain);
+            options.StorageDirectory = storage.Path;
+        });
+
+        ServerCertificate first = await app.WaitForCertificateAsync(domain, Timeout);
+        string firstSerial = first.Leaf.SerialNumber;
+        string firstThumbprint = first.Leaf.Thumbprint;
+
+        await app.Services.GetRequiredService<IAutoHttpsCertificateManager>()
+            .RenewAsync(RevocationReason.KeyCompromise)
+            .WaitAsync(Timeout);
+
+        ServerCertificate second = app.FindCertificate(domain)!;
+        Assert.NotEqual(firstThumbprint, second.Leaf.Thumbprint);
+        Assert.True(await app.HandshakeIsTrustedAsync(domain, _pebble.PebbleRoot));
+
+        // Pebble's own record, not the client's belief: the old certificate is revoked, the new one is not.
+        Assert.Equal("Revoked", await _pebble.CertificateStatusAsync(firstSerial));
+        Assert.Equal("Valid", await _pebble.CertificateStatusAsync(second.Leaf.SerialNumber));
+    }
+
     private static string NewDomain() => $"t{Guid.NewGuid():N}"[..12] + ".autohttps.test";
 
     private sealed class ChallengeTestServerDnsProvider : IDnsChallengeProvider

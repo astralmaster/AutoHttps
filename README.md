@@ -177,8 +177,8 @@ detail.
 | `UseDevelopmentCertificate()` | Serve a locally trusted certificate in Development instead of ordering one. See [Local development](#local-development). |
 
 A few surfaces are used rather than configured. Inject `IAutoHttpsCertificateInspector` to read the
-current certificate and the next renewal time, inject `IAutoHttpsCertificateManager` to revoke a
-certificate, and register the health check with `AddHealthChecks().AddAutoHttps()`. Metrics come from a
+current certificate and the next renewal time, inject `IAutoHttpsCertificateManager` to replace or
+revoke a certificate, and register the health check with `AddHealthChecks().AddAutoHttps()`. Metrics come from a
 meter named `AutoHttps`. All of these are covered under
 [Health, metrics and reacting to changes](#health-metrics-and-reacting-to-changes).
 
@@ -364,8 +364,8 @@ builder.Services
 Each instance also reads the store at every check (`RenewalCheckInterval`, 6 hours by default) and
 switches to a certificate another instance stored there, if it started later and has the configured
 names and kind of key (event 120). So when one instance replaces the certificate early, for example
-after a key compromise, the others follow within one check interval rather than at their own renewal
-date.
+with `RenewAsync` after a key compromise, the others follow within one check interval rather than at
+their own renewal date.
 
 ### Answering http-01 from any replica
 
@@ -611,6 +611,7 @@ exists for diagnosis, not alerting.
 | 154 | Information | Certificates are kept in a store other instances can share, but the lock is still a local file. Fine for one instance, while several need `UseDistributedLock`. Logged once at startup. |
 | 155 | Information | The authority explained the renewal window it set, typically because it moved renewal forward for a revocation. The message carries the URL. Logged once per URL. |
 | 156 | Information | The stored certificate for the configured names was removed, so a new one is being ordered. The previous certificate is served until it arrives. |
+| 159 | Information | The application asked for a new certificate with `RenewAsync`, so one is being ordered whatever the renewal schedule says. |
 | 110 | Warning | An order failed and will be retried. The reason is in the message; the stack trace is logged separately at Debug as event 124. |
 | 112 | Warning | A self-signed fallback is being served, logged once rather than per handshake. |
 | 114 | Warning | The store could not be read; continuing without a cached certificate. |
@@ -802,26 +803,46 @@ app.MapGet("/tls", (IAutoHttpsCertificateInspector inspector) =>
 The status also carries `ConsecutiveFailures`, `LastFailureAt` and `LastFailureReason`, so a status
 page can show that renewal is failing before the certificate gets close to expiring.
 
-### Revoking a certificate
+### Replacing and revoking a certificate
 
-Inject `IAutoHttpsCertificateManager` to revoke a certificate at the authority, for a suspected key
-compromise or when decommissioning one:
+Inject `IAutoHttpsCertificateManager` to replace the certificate in use now, for example after a key
+may have leaked, rather than at its next renewal:
+
+```csharp
+app.MapPost("/tls/replace", async (IAutoHttpsCertificateManager manager) =>
+{
+    // Orders a new certificate, serves it, then revokes the one it replaced.
+    await manager.RenewAsync(RevocationReason.KeyCompromise);
+    return Results.Ok();
+});
+```
+
+`RenewAsync` returns once the new certificate is being served, and with a reason it then revokes the
+previous one. Without a reason nothing is revoked, which also suits applying a changed `Profile` straight
+away. Calls made together share one order, and event 159 records the request. If the order fails, the
+call fails with the order's exception, an `AcmeRateLimitException` while the authority has asked to wait,
+and the certificate in use stays until its ordinary renewal. The order counts against the authority's
+limits like any other: Let's Encrypt allows 5 certificates for the same names a week. Instances that
+share the certificate store switch to the new certificate at their next check (see
+[Running several instances](#running-several-instances)). In Development, while a development certificate
+is served, there is nothing to replace and the call throws.
+
+To revoke without replacing, for example when decommissioning a certificate:
 
 ```csharp
 app.MapPost("/tls/revoke", async (IAutoHttpsCertificateManager manager) =>
 {
-    await manager.RevokeCurrentAsync(RevocationReason.KeyCompromise);
+    await manager.RevokeCurrentAsync(RevocationReason.Superseded);
     return Results.Ok();
 });
 ```
 
 `RevokeCurrentAsync` revokes the certificate currently being served and returns `false` if there is
 none. `RevokeAsync` takes a specific `X509Certificate2`. The request is signed with the ACME account
-key, and event 138 records it. Revocation only tells the authority the certificate is no longer valid.
-AutoHttps keeps serving its local copy and does not order a replacement on its own, so this fits
-decommissioning a certificate. To move an instance onto a fresh one, remove the stored certificate and
-restart. AutoHttps then orders a new certificate at once (event 156) and serves the previous one until
-it arrives, so the names do not drop to the fallback meanwhile.
+key, and event 138 records it. Revocation only tells the authority the certificate is no longer valid:
+AutoHttps keeps serving its local copy and orders no replacement for it. Removing the stored certificate
+and restarting also forces a new one: AutoHttps orders it at once (event 156) and serves the previous
+one until it arrives, so the names do not drop to the fallback meanwhile.
 
 ## Not in scope
 

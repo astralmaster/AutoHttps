@@ -107,6 +107,7 @@ public static class AutoHttpsServiceCollectionExtensions
         services.TryAddSingleton<AutoHttpsMetrics>();
         services.TryAddSingleton<CertificateEventPublisher>();
         services.TryAddSingleton<IAutoHttpsCertificateInspector, AutoHttpsCertificateInspector>();
+        services.TryAddSingleton<RenewalRequests>();
         services.TryAddSingleton<IAutoHttpsCertificateManager, AutoHttpsCertificateManager>();
 
         // Replaced by UseDevelopmentCertificate; disabled unless that is called.

@@ -307,4 +307,11 @@ internal static partial class Log
         Message = "The stored certificate for {Domains} is gone, and removing it is how a new one is forced, so " +
                   "one is being ordered now. The previous certificate is served until it arrives.")]
     public static partial void StoredCertificateRemoved(ILogger logger, string domains);
+
+    [LoggerMessage(
+        EventId = 159,
+        Level = LogLevel.Information,
+        Message = "The application asked for a new certificate for {Domains}, so one is being ordered now whatever " +
+                  "the renewal schedule says.")]
+    public static partial void RenewalRequested(ILogger logger, string domains);
 }

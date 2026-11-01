@@ -86,6 +86,17 @@ public sealed class PebbleFixture : IAsyncLifetime
         PostAsync("clear-txt", new { host = Qualify(host) });
 
     /// <summary>
+    /// What Pebble's management interface says about a certificate it issued, for example "Valid" or
+    /// "Revoked", looked up by serial number.
+    /// </summary>
+    public async Task<string?> CertificateStatusAsync(string serialNumberHex)
+    {
+        string body = await _insecure.GetStringAsync(new Uri($"https://localhost:15000/cert-status-by-serial/{serialNumberHex}"));
+        using JsonDocument status = JsonDocument.Parse(body);
+        return status.RootElement.GetProperty("Status").GetString();
+    }
+
+    /// <summary>
     /// Trusts Pebble's own TLS certificate. Pebble serves its ACME API over HTTPS with a private
     /// root, so the client that talks to it has to be told about that root.
     /// </summary>
