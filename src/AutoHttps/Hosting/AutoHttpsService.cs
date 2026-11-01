@@ -216,6 +216,11 @@ internal sealed class AutoHttpsService : BackgroundService
 
         if (renewAt > now)
         {
+            if (await AdoptNewerFromStoreAsync(storeName, stoppingToken))
+            {
+                return;
+            }
+
             LogSchedule(description, renewAt);
             await DelayAsync(
                 RenewalSchedule.ComputeCheckDelay(now, renewAt, recheckAt, _options.RenewalCheckInterval, DeferredPollInterval),
@@ -519,6 +524,67 @@ internal sealed class AutoHttpsService : BackgroundService
         }
 
         return material;
+    }
+
+    /// <summary>
+    /// Serves a certificate another instance stored since this one loaded its own, so that replicas
+    /// sharing a store follow one that replaced the certificate early, for example after a key
+    /// compromise, instead of each serving the old one until its own renewal. Only a certificate that
+    /// started later and is what the options would order is taken: during a rolling change of
+    /// KeyAlgorithm, replicas on either setting would otherwise take each other's and order again,
+    /// back and forth.
+    /// </summary>
+    private async Task<bool> AdoptNewerFromStoreAsync(string storeName, CancellationToken cancellationToken)
+    {
+        if (_current is not { } current)
+        {
+            return false;
+        }
+
+        CertificateMaterial? material;
+        try
+        {
+            material = await _store.LoadAsync(storeName, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.StoreReadFailed(_logger, ex);
+            return false;
+        }
+
+        if (material is null)
+        {
+            return false;
+        }
+
+        ServerCertificate candidate;
+        try
+        {
+            candidate = CertificateFactory.CreateFromPem(material.CertificateChainPem, material.PrivateKeyPem);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.StoreReadFailed(_logger, ex);
+            return false;
+        }
+
+        bool newer = !IsSameCertificate(current, candidate) &&
+                     candidate.NotBefore > current.NotBefore &&
+                     candidate.NotAfter > _time.GetUtcNow() &&
+                     CoversConfiguredNames(candidate) &&
+                     CertificateKey.Matches(candidate.Leaf, _options.KeyAlgorithm);
+
+        if (!newer)
+        {
+            candidate.Dispose();
+            return false;
+        }
+
+        Publish(candidate);
+        string subjects = string.Join(", ", candidate.SubjectNames);
+        Log.CertificateAdopted(_logger, subjects);
+        await NotifyChangedAsync(candidate, CertificateChangeReason.Adopted, cancellationToken);
+        return true;
     }
 
     /// <summary>

@@ -162,6 +162,109 @@ public class RenewalAndPersistenceTests
     }
 
     [Fact]
+    public async Task AnInstanceAdoptsANewerCertificateAnotherOneStored()
+    {
+        // Replicas sharing a store each serve what they loaded. One that replaced the certificate early,
+        // for example after a key compromise, left the others serving the old one until their own renewal,
+        // weeks away. Each check now picks up a newer certificate from the store.
+        using var storage = new TempStorage();
+        using var elsewhere = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        string older = await IssueIntoAsync(authority, storage);
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+        string newer = await IssueIntoAsync(authority, elsewhere);
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            Configure(storage)(options);
+            options.RenewalCheckInterval = TimeSpan.FromSeconds(1);
+        });
+        Assert.Equal(older, (await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout)).Leaf.Thumbprint);
+
+        CopyStoredCertificate(elsewhere, storage);
+
+        ServerCertificate adopted = await app.WaitForCertificateChangeAsync("app.example.com", older, TimeSpan.FromSeconds(15));
+        Assert.Equal(newer, adopted.Leaf.Thumbprint);
+        Assert.Equal(2, authority.OrderCount);
+        Assert.True(app.Log.CountOf(120) > 0, app.Log.Describe());
+    }
+
+    [Fact]
+    public async Task AnOlderCertificateInTheStoreIsNotAdopted()
+    {
+        using var storage = new TempStorage();
+        using var elsewhere = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        await IssueIntoAsync(authority, elsewhere);
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+        string newer = await IssueIntoAsync(authority, storage);
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            Configure(storage)(options);
+            options.RenewalCheckInterval = TimeSpan.FromSeconds(1);
+        });
+        await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+
+        CopyStoredCertificate(elsewhere, storage);
+        await Task.Delay(TimeSpan.FromSeconds(4));
+
+        Assert.Equal(newer, app.FindCertificate("app.example.com")!.Leaf.Thumbprint);
+    }
+
+    [Fact]
+    public async Task ANewerCertificateWithAnotherKindOfKeyIsNotAdopted()
+    {
+        // During a rolling change of KeyAlgorithm, replicas on the old and the new setting share the store.
+        // Each adopting the other's certificate would make each order again, back and forth.
+        using var storage = new TempStorage();
+        using var elsewhere = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        string older = await IssueIntoAsync(authority, storage);
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+        await IssueIntoAsync(authority, elsewhere, KeyAlgorithm.Rsa2048);
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            Configure(storage)(options);
+            options.RenewalCheckInterval = TimeSpan.FromSeconds(1);
+        });
+        await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+
+        CopyStoredCertificate(elsewhere, storage);
+        await Task.Delay(TimeSpan.FromSeconds(4));
+
+        Assert.Equal(older, app.FindCertificate("app.example.com")!.Leaf.Thumbprint);
+        Assert.Equal(0, app.Log.CountOf(151));
+    }
+
+    private static async Task<string> IssueIntoAsync(
+        TestCertificateAuthority authority,
+        TempStorage storage,
+        KeyAlgorithm keyAlgorithm = KeyAlgorithm.EcdsaP256)
+    {
+        await using TestApplication issuer = await TestApplication.StartAsync(authority, options =>
+        {
+            Configure(storage)(options);
+            options.KeyAlgorithm = keyAlgorithm;
+        });
+
+        return (await issuer.WaitForCertificateAsync("app.example.com", IssuanceTimeout)).Leaf.Thumbprint;
+    }
+
+    /// <summary>Puts the certificate one store holds for the configured names into another, as a replica would.</summary>
+    private static void CopyStoredCertificate(TempStorage from, TempStorage to)
+    {
+        foreach (string file in Stored(from, "*.crt.pem").Concat(Stored(from, "*.key.pem")))
+        {
+            File.Copy(file, Path.Combine(to.Path, Path.GetFileName(file)), overwrite: true);
+        }
+    }
+
+    [Fact]
     public async Task TheCertificateIsOnDiskBeforeItIsEverServed()
     {
         using var storage = new TempStorage();

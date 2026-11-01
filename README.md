@@ -361,6 +361,12 @@ builder.Services
     .UseDistributedLock<MyRedisLock>();
 ```
 
+Each instance also reads the store at every check (`RenewalCheckInterval`, 6 hours by default) and
+switches to a certificate another instance stored there, if it started later and has the configured
+names and kind of key (event 120). So when one instance replaces the certificate early, for example
+after a key compromise, the others follow within one check interval rather than at their own renewal
+date.
+
 ### Answering http-01 from any replica
 
 The instance that wins the lock is not necessarily the one the certificate authority's validation
