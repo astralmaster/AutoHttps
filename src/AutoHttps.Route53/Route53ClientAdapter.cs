@@ -64,41 +64,51 @@ internal sealed class Route53ClientAdapter : IRoute53Client, IDisposable
         return null;
     }
 
-    public async Task<string> ChangeTxtAsync(
+    public async Task<Route53ChangeResult> TryReplaceTxtAsync(
         string zoneId,
         string recordName,
-        string action,
-        long ttl,
-        IReadOnlyList<string> values,
+        Route53TxtRecord? expected,
+        Route53TxtRecord? replacement,
         CancellationToken cancellationToken)
     {
-        var recordSet = new ResourceRecordSet
+        var changes = new List<Change>();
+
+        if (expected is not null)
         {
-            Name = Normalize(recordName),
-            Type = RRType.TXT,
-            TTL = ttl,
-            ResourceRecords = values.Select(value => new ResourceRecord { Value = value }).ToList(),
-        };
+            changes.Add(new Change { Action = ChangeAction.DELETE, ResourceRecordSet = ToRecordSet(recordName, expected) });
+        }
+
+        if (replacement is not null)
+        {
+            changes.Add(new Change { Action = ChangeAction.CREATE, ResourceRecordSet = ToRecordSet(recordName, replacement) });
+        }
 
         var request = new ChangeResourceRecordSetsRequest
         {
             HostedZoneId = zoneId,
-            ChangeBatch = new ChangeBatch
-            {
-                Changes =
-                [
-                    new Change
-                    {
-                        Action = string.Equals(action, "DELETE", StringComparison.Ordinal) ? ChangeAction.DELETE : ChangeAction.UPSERT,
-                        ResourceRecordSet = recordSet,
-                    },
-                ],
-            },
+            ChangeBatch = new ChangeBatch { Changes = changes },
         };
 
-        ChangeResourceRecordSetsResponse response = await _route53.ChangeResourceRecordSetsAsync(request, cancellationToken);
-        return response.ChangeInfo?.Id ?? string.Empty;
+        try
+        {
+            ChangeResourceRecordSetsResponse response = await _route53.ChangeResourceRecordSetsAsync(request, cancellationToken);
+            return new Route53ChangeResult(response.ChangeInfo?.Id ?? string.Empty, null);
+        }
+        catch (InvalidChangeBatchException ex)
+        {
+            // What a set changed by someone else since it was read looks like: the DELETE no longer
+            // matches it, or the CREATE finds one. The caller reads the set again and retries.
+            return new Route53ChangeResult(null, ex.Message);
+        }
     }
+
+    private static ResourceRecordSet ToRecordSet(string recordName, Route53TxtRecord record) => new()
+    {
+        Name = Normalize(recordName),
+        Type = RRType.TXT,
+        TTL = record.Ttl,
+        ResourceRecords = record.Values.Select(value => new ResourceRecord { Value = value }).ToList(),
+    };
 
     public async Task<bool> IsChangeInSyncAsync(string changeId, CancellationToken cancellationToken)
     {

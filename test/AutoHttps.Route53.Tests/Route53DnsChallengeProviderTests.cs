@@ -15,7 +15,7 @@ public sealed class Route53DnsChallengeProviderTests
     private const string Name = "_acme-challenge.example.com";
 
     [Fact]
-    public async Task CreateUpsertsAQuotedValueToTheConfiguredZone()
+    public async Task CreateWritesAQuotedValueToTheConfiguredZone()
     {
         var route53 = new FakeRoute53();
         Route53DnsChallengeProvider provider = Provider(route53, o => o.HostedZoneId = "zone1");
@@ -24,9 +24,9 @@ public sealed class Route53DnsChallengeProviderTests
 
         FakeRoute53.RecordedChange change = Assert.Single(route53.Changes);
         Assert.Equal("zone1", change.ZoneId);
-        Assert.Equal("UPSERT", change.Action);
-        Assert.Equal(60, change.Ttl);
-        Assert.Equal("\"the-value\"", Assert.Single(change.Values));
+        Assert.Null(change.Expected);
+        Assert.Equal(60, change.Replacement!.Ttl);
+        Assert.Equal("\"the-value\"", Assert.Single(change.Replacement.Values));
     }
 
     [Fact]
@@ -177,8 +177,53 @@ public sealed class Route53DnsChallengeProviderTests
         await provider.DeleteTxtRecordAsync(Name, "the-value", CancellationToken.None);
 
         FakeRoute53.RecordedChange change = Assert.Single(route53.Changes);
-        Assert.Equal("DELETE", change.Action);
+        Assert.Null(change.Replacement);
         Assert.Null(route53.Current("zone1", Name));
+    }
+
+    [Fact]
+    public async Task AWriterBetweenTheReadAndTheWriteKeepsItsValue()
+    {
+        // Another deployment ordering for the same name at the same moment, with a lock of its own, reads
+        // the same empty set. An unconditional write then drops whichever value was written first, and
+        // that order fails validation although Route 53 reported its change as applied.
+        var route53 = new FakeRoute53();
+        Route53DnsChallengeProvider provider = Provider(route53, o => o.HostedZoneId = "zone1");
+        route53.InterfereOnce = () => route53.Seed("zone1", Name, 300, "\"theirs\"");
+
+        await provider.CreateTxtRecordAsync(Name, "ours", CancellationToken.None);
+
+        Route53TxtRecord stored = route53.Current("zone1", Name)!;
+        Assert.Equal(["\"ours\"", "\"theirs\""], stored.Values.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(1, route53.Conflicts);
+    }
+
+    [Fact]
+    public async Task RemovingOurValueKeepsOneAddedMeanwhile()
+    {
+        var route53 = new FakeRoute53();
+        route53.Seed("zone1", Name, 300, "\"ours\"");
+        Route53DnsChallengeProvider provider = Provider(route53, o => o.HostedZoneId = "zone1");
+        route53.InterfereOnce = () => route53.Seed("zone1", Name, 300, "\"ours\"", "\"theirs\"");
+
+        await provider.DeleteTxtRecordAsync(Name, "ours", CancellationToken.None);
+
+        Assert.Equal(["\"theirs\""], route53.Current("zone1", Name)!.Values.ToArray());
+        Assert.Equal(1, route53.Conflicts);
+    }
+
+    [Fact]
+    public async Task ARecordSetThatKeepsChangingIsGivenUpAfterFiveAttempts()
+    {
+        var route53 = new FakeRoute53 { AlwaysInterfere = true };
+        Route53DnsChallengeProvider provider = Provider(route53, o => o.HostedZoneId = "zone1");
+
+        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.CreateTxtRecordAsync(Name, "ours", CancellationToken.None));
+
+        Assert.Equal(5, route53.Conflicts);
+        Assert.Contains(Name, error.Message, StringComparison.Ordinal);
+        Assert.Contains("does not match", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -317,8 +362,9 @@ public sealed class Route53DnsChallengeProviderTests
     }
 
     /// <summary>
-    /// Holds record sets the way Route 53 does: one set of quoted values per name, replaced whole by
-    /// an UPSERT, and removed by a DELETE only when it names the set exactly as it stands.
+    /// Holds record sets the way Route 53 does: one set of quoted values per name. A change batch is
+    /// applied whole or not at all, a DELETE has to name the set exactly as it stands, values and TTL,
+    /// and a CREATE fails when a set already exists, so DELETE plus CREATE is a compare-and-swap.
     /// </summary>
     private sealed class FakeRoute53 : IRoute53Client
     {
@@ -328,7 +374,17 @@ public sealed class Route53DnsChallengeProviderTests
 
         public List<string> ZoneQueries { get; } = [];
 
+        /// <summary>Every change batch that was applied.</summary>
         public List<RecordedChange> Changes { get; } = [];
+
+        /// <summary>How many change batches were refused because the set no longer matched.</summary>
+        public int Conflicts { get; private set; }
+
+        /// <summary>Runs once, just before the next change batch is applied, as another writer would.</summary>
+        public Action? InterfereOnce { get; set; }
+
+        /// <summary>Changes the set before every change batch, so no batch ever matches.</summary>
+        public bool AlwaysInterfere { get; set; }
 
         public void Seed(string zoneId, string recordName, long ttl, params string[] values) =>
             _records[(zoneId, recordName)] = new Route53TxtRecord(ttl, values);
@@ -350,31 +406,48 @@ public sealed class Route53DnsChallengeProviderTests
 
         public List<string> StatusChecks { get; } = [];
 
-        public Task<string> ChangeTxtAsync(
+        public Task<Route53ChangeResult> TryReplaceTxtAsync(
             string zoneId,
             string recordName,
-            string action,
-            long ttl,
-            IReadOnlyList<string> values,
+            Route53TxtRecord? expected,
+            Route53TxtRecord? replacement,
             CancellationToken cancellationToken)
         {
-            Changes.Add(new RecordedChange(zoneId, recordName, action, ttl, values.ToList()));
-            string id = "/change/C" + Changes.Count;
+            Action? interference = InterfereOnce;
+            InterfereOnce = null;
+            interference?.Invoke();
 
-            if (action == "UPSERT")
+            if (AlwaysInterfere)
             {
-                _records[(zoneId, recordName)] = new Route53TxtRecord(ttl, values.ToArray());
-                return Task.FromResult(id);
+                Route53TxtRecord? before = Current(zoneId, recordName);
+                _records[(zoneId, recordName)] = new Route53TxtRecord(
+                    before?.Ttl ?? 60, [.. before?.Values ?? [], "\"other-" + Guid.NewGuid().ToString("n") + "\""]);
             }
 
             Route53TxtRecord? current = Current(zoneId, recordName);
-            if (current is null || current.Ttl != ttl || !current.Values.SequenceEqual(values))
+            bool matches = expected is null
+                ? current is null
+                : current is not null && current.Ttl == expected.Ttl &&
+                  current.Values.Order(StringComparer.Ordinal).SequenceEqual(expected.Values.Order(StringComparer.Ordinal));
+
+            if (!matches)
             {
-                throw new InvalidOperationException("InvalidChangeBatch: the DELETE does not match the record set.");
+                Conflicts++;
+                return Task.FromResult(new Route53ChangeResult(null, "Tried to change the record set but it does not match."));
             }
 
-            _records.Remove((zoneId, recordName));
-            return Task.FromResult(id);
+            Changes.Add(new RecordedChange(zoneId, recordName, expected, replacement));
+
+            if (replacement is null)
+            {
+                _records.Remove((zoneId, recordName));
+            }
+            else
+            {
+                _records[(zoneId, recordName)] = replacement;
+            }
+
+            return Task.FromResult(new Route53ChangeResult("/change/C" + Changes.Count, null));
         }
 
         public Task<bool> IsChangeInSyncAsync(string changeId, CancellationToken cancellationToken)
@@ -390,6 +463,6 @@ public sealed class Route53DnsChallengeProviderTests
             return Task.FromResult(true);
         }
 
-        internal sealed record RecordedChange(string ZoneId, string Name, string Action, long Ttl, IReadOnlyList<string> Values);
+        internal sealed record RecordedChange(string ZoneId, string Name, Route53TxtRecord? Expected, Route53TxtRecord? Replacement);
     }
 }

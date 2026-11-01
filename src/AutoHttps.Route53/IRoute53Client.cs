@@ -17,15 +17,18 @@ internal interface IRoute53Client
     Task<Route53TxtRecord?> GetTxtRecordAsync(string zoneId, string recordName, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Applies a change (<c>UPSERT</c> or <c>DELETE</c>) to the TXT record at <paramref name="recordName"/>
-    /// and returns the id Route 53 gave the change.
+    /// Replaces the TXT record set at <paramref name="recordName"/> in one change batch, which Route 53
+    /// applies whole or not at all: a DELETE of <paramref name="expected"/> exactly as it was read, when
+    /// there was one, then a CREATE of <paramref name="replacement"/>, when there is one. A DELETE that
+    /// does not match the set as it now stands, or a CREATE where a set now exists, refuses the batch,
+    /// so the write only lands when nobody changed the set since it was read.
     /// </summary>
-    Task<string> ChangeTxtAsync(
+    /// <returns>The change id, or the reason Route 53 refused the batch.</returns>
+    Task<Route53ChangeResult> TryReplaceTxtAsync(
         string zoneId,
         string recordName,
-        string action,
-        long ttl,
-        IReadOnlyList<string> values,
+        Route53TxtRecord? expected,
+        Route53TxtRecord? replacement,
         CancellationToken cancellationToken);
 
     /// <summary>Whether Route 53 has applied the change to every name server for the zone (INSYNC).</summary>
@@ -34,3 +37,9 @@ internal interface IRoute53Client
 
 /// <summary>A TXT record's values, as Route 53 stores them (each already quoted), and its TTL.</summary>
 internal sealed record Route53TxtRecord(long Ttl, IReadOnlyList<string> Values);
+
+/// <summary>
+/// The outcome of <see cref="IRoute53Client.TryReplaceTxtAsync"/>: the change id when the batch was
+/// applied, otherwise Route 53's reason for refusing it.
+/// </summary>
+internal readonly record struct Route53ChangeResult(string? ChangeId, string? Refusal);

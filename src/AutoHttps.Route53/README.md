@@ -49,7 +49,8 @@ config, or an instance role. Set them explicitly if you need to:
 Route 53 keeps every TXT value at a name in one record set, and a wildcard with its apex, or another
 client ordering for the same name, puts more than one value at `_acme-challenge`. The provider adds its
 value to whatever is there and later removes only that value, deleting the set only when nothing else
-is left in it.
+is left in it. Each change names the set as it was read, so Route 53 refuses it if another client
+changed the set in between, and the provider then reads it again and retries, up to five times.
 
 After publishing a value the provider waits, for up to two minutes, until Route 53 reports the change on
 every name server for the zone (`INSYNC`). AWS says that generally takes under a minute, and asking for

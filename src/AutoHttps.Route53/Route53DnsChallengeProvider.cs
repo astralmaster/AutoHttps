@@ -14,6 +14,7 @@ namespace AutoHttps.Route53;
 public sealed class Route53DnsChallengeProvider : IDnsChallengeProvider
 {
     private const string ChallengePrefix = "_acme-challenge.";
+    private const int MaxAttempts = 5;
 
     // AWS says a change generally reaches every name server for the zone within 60 seconds. Both
     // values follow what certbot and lego settled on for the same wait.
@@ -37,28 +38,39 @@ public sealed class Route53DnsChallengeProvider : IDnsChallengeProvider
 
     /// <inheritdoc />
     /// <remarks>
-    /// Route 53 keeps every TXT value at a name in one record set, and an UPSERT replaces the whole set.
+    /// Route 53 keeps every TXT value at a name in one record set, and a write replaces the whole set.
     /// Other values can be there for good reasons: a wildcard and its apex in one order both use
     /// <c>_acme-challenge</c> at the apex, and so does another application or cert-manager ordering
-    /// for the same name. So the value is added to what is there rather than written over it.
+    /// for the same name. So the value is added to what is there rather than written over it, and the
+    /// write only lands if the set is still as it was read. Otherwise it is read again and retried.
     /// </remarks>
     public async Task CreateTxtRecordAsync(string recordName, string recordValue, CancellationToken cancellationToken)
     {
         string zoneId = await ResolveZoneIdAsync(recordName, cancellationToken);
         string value = Quote(recordValue);
 
-        Route53TxtRecord? existing = await _client.GetTxtRecordAsync(zoneId, recordName, cancellationToken);
-        if (existing is not null && existing.Values.Contains(value, StringComparer.Ordinal))
+        for (int attempt = 1; ; attempt++)
         {
-            return;
+            Route53TxtRecord? existing = await _client.GetTxtRecordAsync(zoneId, recordName, cancellationToken);
+            if (existing is not null && existing.Values.Contains(value, StringComparer.Ordinal))
+            {
+                return;
+            }
+
+            // An existing set keeps its own TTL, which belongs to whoever created it.
+            Route53TxtRecord replacement = existing is null
+                ? new Route53TxtRecord(_options.RecordTtlSeconds, [value])
+                : new Route53TxtRecord(existing.Ttl, [.. existing.Values, value]);
+
+            Route53ChangeResult result = await _client.TryReplaceTxtAsync(zoneId, recordName, existing, replacement, cancellationToken);
+            if (result.ChangeId is { } changeId)
+            {
+                await WaitUntilInSyncAsync(changeId, recordName, cancellationToken);
+                return;
+            }
+
+            ThrowIfOutOfAttempts(attempt, recordName, result.Refusal);
         }
-
-        // An existing set keeps its own TTL, which belongs to whoever created it.
-        IReadOnlyList<string> values = existing is null ? [value] : [.. existing.Values, value];
-        long ttl = existing?.Ttl ?? _options.RecordTtlSeconds;
-
-        string changeId = await _client.ChangeTxtAsync(zoneId, recordName, "UPSERT", ttl, values, cancellationToken);
-        await WaitUntilInSyncAsync(changeId, recordName, cancellationToken);
     }
 
     /// <summary>
@@ -99,23 +111,39 @@ public sealed class Route53DnsChallengeProvider : IDnsChallengeProvider
         string zoneId = await ResolveZoneIdAsync(recordName, cancellationToken);
         string value = Quote(recordValue);
 
-        Route53TxtRecord? existing = await _client.GetTxtRecordAsync(zoneId, recordName, cancellationToken);
-        if (existing is null || !existing.Values.Contains(value, StringComparer.Ordinal))
+        for (int attempt = 1; ; attempt++)
         {
-            return;
+            Route53TxtRecord? existing = await _client.GetTxtRecordAsync(zoneId, recordName, cancellationToken);
+            if (existing is null || !existing.Values.Contains(value, StringComparer.Ordinal))
+            {
+                return;
+            }
+
+            string[] remaining = [.. existing.Values.Where(stored => !string.Equals(stored, value, StringComparison.Ordinal))];
+            Route53TxtRecord? replacement = remaining.Length > 0 ? new Route53TxtRecord(existing.Ttl, remaining) : null;
+
+            Route53ChangeResult result = await _client.TryReplaceTxtAsync(zoneId, recordName, existing, replacement, cancellationToken);
+            if (result.ChangeId is not null)
+            {
+                return;
+            }
+
+            ThrowIfOutOfAttempts(attempt, recordName, result.Refusal);
         }
+    }
 
-        string[] remaining = [.. existing.Values.Where(stored => !string.Equals(stored, value, StringComparison.Ordinal))];
-
-        if (remaining.Length > 0)
+    // Each retry rereads the set, so this only gives up when something keeps changing it faster than a
+    // read and a write take, or when Route 53 refuses the batch for a reason a retry cannot fix, which
+    // its own message then says.
+    private static void ThrowIfOutOfAttempts(int attempt, string recordName, string? refusal)
+    {
+        if (attempt >= MaxAttempts)
         {
-            await _client.ChangeTxtAsync(zoneId, recordName, "UPSERT", existing.Ttl, remaining, cancellationToken);
-            return;
+            throw new InvalidOperationException(
+                $"Route 53 refused {MaxAttempts} changes in a row to the TXT record set '{recordName}', which happens " +
+                $"when something else keeps changing it while AutoHttps updates it, so the update was abandoned. " +
+                $"Route 53 said: {refusal}");
         }
-
-        // A DELETE has to name the record set exactly as it stands, so it carries the values and TTL
-        // that were just read.
-        await _client.ChangeTxtAsync(zoneId, recordName, "DELETE", existing.Ttl, existing.Values, cancellationToken);
     }
 
     private async Task<string> ResolveZoneIdAsync(string recordName, CancellationToken cancellationToken)
