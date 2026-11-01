@@ -1,11 +1,12 @@
 # Runs the suite against Pebble, the ACME test server Let's Encrypt builds alongside Boulder, so
-# the client is checked against an implementation nobody here wrote. It is kept out of the pull
-# request build because it needs Pebble to reach the runner over the Docker bridge, and runs on a
-# nightly schedule instead so wire-level regressions are caught without waiting for someone to
-# dispatch it. It can still be started by hand.
+# the client is checked against an implementation nobody here wrote. It runs on every pull request,
+# so a change that Let's Encrypt's own code refuses is caught before it merges, nightly so a new
+# Pebble release that changes behaviour is noticed, and by hand.
 name: Pebble
 
 on:
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
   schedule:
     - cron: '30 3 * * *'
@@ -15,9 +16,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 

@@ -543,6 +543,9 @@ stating:
   The slim builder leaves out both. Without the first the endpoint silently binds TCP only; without
   the second the bind fails with a message telling you to call it. `CreateBuilder` includes both.
 
+Exposing QUIC also means keeping .NET patched: the 10.0.13 and 8.0.32 updates of 2026-10-13 fixed a
+remote code execution vulnerability in Microsoft QUIC, the transport HTTP/3 runs on (CVE-2026-105016).
+
 The chain caveat from [Sending the full chain](#sending-the-full-chain) applies unchanged: the
 `UseAutoHttps(listenOptions, ...)` wiring sends the issued intermediates over HTTP/3, and the
 automatic HTTPS-defaults wiring sends the leaf alone, because Kestrel drops a configured chain
