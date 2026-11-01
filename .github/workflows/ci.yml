@@ -110,4 +110,6 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: nupkg
-          path: artifacts/*.nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
