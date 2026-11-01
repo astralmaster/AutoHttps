@@ -118,7 +118,7 @@ public class CaaPolicyTests
 
     [Theory]
     [InlineData("validationmethods=HTTP-01")]
-    [InlineData("validationmethods=dns-01, http-01")]
+    [InlineData("validationmethods=dns-01,,http-01")]
     [InlineData("validationmethods=http-01; validationmethods=http-01")]
     public void AValidationMethodsListTheAuthorityCannotReadPermitsNothing(string parameters) =>
         Assert.Equal(
@@ -134,6 +134,20 @@ public class CaaPolicyTests
                 LetsEncrypt,
                 wildcard: false,
                 accountUri: "https://acme.example/acct/1"));
+
+    [Theory]
+    [InlineData("accounturi")]
+    [InlineData("account_uri=https://acme.example/acct/1")]
+    [InlineData("accounturi=https://acme.example/acct 1")]
+    [InlineData("validationmethods=dns-01, http-01")]
+    public void AMalformedParameterMakesTheRecordUnusable(string parameter) =>
+        Assert.Equal(
+            CaaVerdict.Forbidden,
+            CaaPolicy.Evaluate([$"0 issue \"letsencrypt.org; {parameter}\""], LetsEncrypt, wildcard: false));
+
+    [Fact]
+    public void ATrailingSemicolonIsNotAMalformedParameter() =>
+        Assert.Equal(CaaVerdict.Permitted, CaaPolicy.Evaluate(["0 issue \"letsencrypt.org;\""], LetsEncrypt, wildcard: false));
 
     [Fact]
     public void AParameterNameInAnotherCaseIsNotThatParameter() =>

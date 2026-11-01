@@ -189,6 +189,8 @@ internal static class CaaPolicy
     /// Splits an issue value into the authority's domain and its parameters (RFC 8659 section 4.2). An
     /// empty domain is the ";" that forbids everyone, which names no authority. Parameter names are
     /// kept as written: Boulder matches them case-sensitively, so <c>AccountURI</c> is not accounturi.
+    /// A parameter that is not tag=value, a tag that is not letters, digits and inner hyphens, or a
+    /// value holding a space or a semicolon makes the record malformed, and Boulder then skips it.
     /// </summary>
     private static bool TrySplit(string value, out string domain, out List<KeyValuePair<string, string>> parameters)
     {
@@ -199,15 +201,38 @@ internal static class CaaPolicy
 
         for (int i = 1; i < parts.Length; i++)
         {
-            int equals = parts[i].IndexOf('=', StringComparison.Ordinal);
-            if (equals > 0)
+            // An empty part is what a trailing semicolon leaves, which the RFC 8659 grammar allows.
+            if (parts[i].Length == 0)
             {
-                parameters.Add(new(parts[i][..equals].Trim(), parts[i][(equals + 1)..].Trim()));
+                continue;
             }
+
+            int equals = parts[i].IndexOf('=', StringComparison.Ordinal);
+            if (equals <= 0)
+            {
+                return false;
+            }
+
+            string tag = parts[i][..equals].Trim();
+            string parameterValue = parts[i][(equals + 1)..].Trim();
+
+            if (!IsParameterTag(tag) || !parameterValue.All(static c => c is >= '\x21' and <= '\x7e' and not ';'))
+            {
+                return false;
+            }
+
+            parameters.Add(new(tag, parameterValue));
         }
 
         return domain.Length > 0;
     }
+
+    // Boulder's ^[[:alnum:]](-*[[:alnum:]])*$: alphanumeric at both ends, hyphens only in between.
+    private static bool IsParameterTag(string tag) =>
+        tag.Length > 0 &&
+        char.IsAsciiLetterOrDigit(tag[0]) &&
+        char.IsAsciiLetterOrDigit(tag[^1]) &&
+        tag.All(static c => char.IsAsciiLetterOrDigit(c) || c == '-');
 
     /// <summary>
     /// Reads a parameter that may appear once. Returns false when it appears more than once, which
