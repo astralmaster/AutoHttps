@@ -78,6 +78,28 @@ public sealed class RenewOnDemandTests
     }
 
     [Fact]
+    public async Task RequestsToReplaceAndRevokeMadeTogetherAllSucceed()
+    {
+        // A double click on an admin endpoint, or two calls that crossed. They share one order and so
+        // one certificate to revoke, and the authority refuses the second revocation as alreadyRevoked.
+        // That is the outcome every caller asked for, so none of them may fail over it.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        await using TestApplication app = await StartAsync(authority, storage);
+
+        string original = (await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout)).Leaf.Thumbprint;
+
+        IAutoHttpsCertificateManager manager = Manager(app);
+        await Task.WhenAll(
+            manager.RenewAsync(RevocationReason.KeyCompromise),
+            manager.RenewAsync(RevocationReason.KeyCompromise)).WaitAsync(CallTimeout);
+
+        Assert.Equal(2, authority.OrderCount);
+        Assert.Equal(RevocationReason.KeyCompromise, (RevocationReason)authority.Revocations[original]);
+        Assert.Single(authority.Revocations);
+    }
+
+    [Fact]
     public async Task AFailedRenewalFaultsTheCallAndDoesNotKeepOrdering()
     {
         using var storage = new TempStorage();

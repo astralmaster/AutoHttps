@@ -159,6 +159,9 @@ internal static class AcmeErrorTypes
     public const string Unauthorized = "urn:ietf:params:acme:error:unauthorized";
     public const string IncorrectResponse = "urn:ietf:params:acme:error:incorrectResponse";
 
+    /// <summary>The certificate a revocation names is revoked already (RFC 8555 section 7.6).</summary>
+    public const string AlreadyRevoked = "urn:ietf:params:acme:error:alreadyRevoked";
+
     /// <summary>The order asked for a profile the authority refuses (draft-ietf-acme-profiles).</summary>
     public const string InvalidProfile = "urn:ietf:params:acme:error:invalidProfile";
 }

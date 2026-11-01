@@ -1049,7 +1049,13 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
                 return;
             }
 
-            _revoked[match.Leaf.Thumbprint] = reason;
+            // RFC 8555 section 7.6, and what Boulder and Pebble do: a second revocation is refused.
+            if (!_revoked.TryAdd(match.Leaf.Thumbprint, reason))
+            {
+                await WriteProblemAsync(context, StatusCodes.Status400BadRequest, "urn:ietf:params:acme:error:alreadyRevoked", "Certificate already revoked.");
+                return;
+            }
+
             context.Response.StatusCode = StatusCodes.Status200OK;
         }
         catch (JwsVerificationException ex)

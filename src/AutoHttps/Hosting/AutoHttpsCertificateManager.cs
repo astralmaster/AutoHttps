@@ -53,8 +53,18 @@ internal sealed class AutoHttpsCertificateManager : IAutoHttpsCertificateManager
         if (previous is not null && revokePrevious is { } reason)
         {
             AcmeClient client = await _session.GetClientAsync(requireAccount: true, cancellationToken);
-            await client.RevokeCertificateAsync(previous, (int)reason, cancellationToken);
-            Log.CertificateRevoked(_logger, replacing!, reason);
+
+            try
+            {
+                await client.RevokeCertificateAsync(previous, (int)reason, cancellationToken);
+                Log.CertificateRevoked(_logger, replacing!, reason);
+            }
+            catch (AcmeException ex) when (ex.ErrorType == AcmeErrorTypes.AlreadyRevoked)
+            {
+                // Calls made together share one order, so they replace the same certificate and every
+                // one of them revokes it. The first does, and the rest are told it already is, which is
+                // the outcome each of them asked for.
+            }
         }
     }
 
