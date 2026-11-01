@@ -58,4 +58,6 @@ validation before then can fail it.
 
 A minimum policy grants `route53:ChangeResourceRecordSets` and `route53:ListResourceRecordSets` on the
 hosted zone, `route53:GetChange` to wait for a change to apply, plus `route53:ListHostedZonesByName`
-when the zone is discovered.
+when the zone is discovered. The record changes are `CREATE` and `DELETE` (not `UPSERT`), so a policy
+that narrows `route53:ChangeResourceRecordSetsActions` has to allow those two, and one that names
+`route53:ChangeResourceRecordSetsRecordTypes` has to allow `TXT`.
