@@ -22,4 +22,13 @@
     <VersionPrefix>1.8.0</VersionPrefix>
   </PropertyGroup>
 
+  <!-- A .snupkg next to each .nupkg, so a debugger can step into the library from nuget.org's symbol
+       server. ContinuousIntegrationBuild makes the paths in the PDB repository relative, which source
+       link needs. Pass it on the command line when packing outside CI. -->
+  <PropertyGroup>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
 </Project>
