@@ -541,6 +541,82 @@ public class PebbleIssuanceTests
 
     private static string NewDomain() => $"t{Guid.NewGuid():N}"[..12] + ".autohttps.test";
 
+    [Fact]
+    public async Task IssuesAWildcardAndItsApexThroughACnameAlias()
+    {
+        using var storage = new TempStorage();
+        string zone = NewDomain();
+        string alias = zone + ".validation.autohttps.test";
+        string challengeName = "_acme-challenge." + zone;
+
+        var dns = new ChallengeTestServerDnsProvider(_pebble);
+        await _pebble.SetCnameAsync(challengeName, alias);
+
+        try
+        {
+            await using PebbleApplication app = await PebbleApplication.StartAsync(_pebble, options =>
+            {
+                options.DomainNames.Add("*." + zone);
+                options.DomainNames.Add(zone);
+                options.PreferredChallengeType = "dns-01";
+                options.DnsChallengeProvider = dns;
+                options.DnsChallengeAliases[zone] = alias;
+                options.StorageDirectory = storage.Path;
+            });
+
+            ServerCertificate certificate = await app.WaitForCertificateAsync("api." + zone, Timeout);
+
+            Assert.True(certificate.Matches(zone));
+            Assert.True(await app.HandshakeIsTrustedAsync("api." + zone, _pebble.PebbleRoot));
+
+            // Pebble found the values by following the CNAME: nothing was ever written at the original name.
+            Assert.NotEmpty(dns.Names);
+            Assert.All(dns.Names, name => Assert.Equal(alias, name));
+        }
+        finally
+        {
+            await _pebble.ClearCnameAsync(challengeName);
+        }
+    }
+
+    [Fact]
+    public async Task ADelegatedNameDoesNotValidateWithoutTheAlias()
+    {
+        // Proves the test above: with the CNAME in place Pebble reads only the target, so the record
+        // written at the original name is not found and the order fails.
+        using var storage = new TempStorage();
+        string zone = NewDomain();
+        string challengeName = "_acme-challenge." + zone;
+
+        var dns = new ChallengeTestServerDnsProvider(_pebble);
+        await _pebble.SetCnameAsync(challengeName, zone + ".validation.autohttps.test");
+
+        try
+        {
+            await using PebbleApplication app = await PebbleApplication.StartAsync(_pebble, options =>
+            {
+                options.DomainNames.Add(zone);
+                options.PreferredChallengeType = "dns-01";
+                options.DnsChallengeProvider = dns;
+                options.StorageDirectory = storage.Path;
+            });
+
+            DateTimeOffset deadline = DateTimeOffset.UtcNow + Timeout;
+            while (app.Log.CountOf(110) == 0 && DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(250);
+            }
+
+            Assert.True(app.Log.CountOf(110) > 0, app.Log.Describe());
+            Assert.Null(app.FindCertificate(zone));
+            Assert.Contains(challengeName, dns.Names);
+        }
+        finally
+        {
+            await _pebble.ClearCnameAsync(challengeName);
+        }
+    }
+
     private sealed class ChallengeTestServerDnsProvider : IDnsChallengeProvider
     {
         private readonly PebbleFixture _pebble;
@@ -550,9 +626,12 @@ public class PebbleIssuanceTests
 
         public int Created => _created;
 
+        public System.Collections.Concurrent.ConcurrentQueue<string> Names { get; } = new();
+
         public Task CreateTxtRecordAsync(string recordName, string recordValue, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _created);
+            Names.Enqueue(recordName);
             return _pebble.AddTxtRecordAsync(recordName, recordValue);
         }
 

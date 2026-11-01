@@ -141,6 +141,7 @@ The quick start covers the common case. These are the rest:
 | `StorageDirectory` | local app data | Where certificates and the account key live. |
 | `ExternalAccountBinding` | *(none)* | Required by ZeroSSL and Google Trust Services. |
 | `DnsChallengeProvider` | *(none)* | Publishes TXT records for `dns-01`. |
+| `DnsChallengeAliases` | *(empty)* | Per domain, the name `_acme-challenge.<domain>` is a CNAME of, so the record is written there. See [Delegating the challenge to another zone](#delegating-the-challenge-to-another-zone). |
 | `PreferredChallengeType` | `http-01` | `http-01` or `dns-01`. |
 | `DnsPropagationDelay` | 30s | Wait after publishing a TXT record before asking for validation. Ignored when `DnsPropagationResolver` is set. |
 | `DnsPropagationResolver` | *(none)* | DNS-over-HTTPS resolver to poll until the TXT record is visible, instead of the fixed wait. |
@@ -300,6 +301,29 @@ ahead anyway and event 134 is logged, because the authority runs its own propaga
 resolver can briefly serve stale data, so the check is advisory: it shortens the common case and catches
 a provider that never published the record, without ever blocking issuance. AutoHttps makes no DNS
 lookups of its own unless you set this.
+
+### Delegating the challenge to another zone
+
+When the zone that holds your names has no API, or the application should not hold credentials for
+it, point the challenge name somewhere else once, by hand:
+
+```
+_acme-challenge.example.com.  CNAME  example.com.validation.example.net.
+```
+
+Then tell AutoHttps to write the record at the target, with a provider for the zone that holds it:
+
+```csharp
+options.DnsChallengeAliases["example.com"] = "example.com.validation.example.net";
+```
+
+The authority follows the CNAME when it validates, so the record is only ever written in the
+delegated zone. A wildcard and its apex are validated at the same name and share one entry, and every
+other name keeps its own `_acme-challenge` record unless it has an entry too. The target can be any
+name the provider can write. AutoHttps does not create the CNAME. With `DnsPropagationResolver` set, the
+propagation check reads `_acme-challenge.example.com` rather than the target, so it waits until the
+record is visible the way the authority will see it, and the diagnostics (`dns-alias:<name>`) report a
+CNAME that is missing or points elsewhere.
 
 ## Running behind a proxy
 
@@ -712,6 +736,7 @@ Every check is read only. What it looks at:
 | `account-binding` | Whether the authority requires external account binding and whether one is configured. |
 | `profile` | Whether the authority offers the profile you asked for. |
 | `dns:<name>` | Whether the name resolves, and whether the resolver answers `SERVFAIL`, which almost always means a broken DNSSEC chain. A missing AAAA record is reported as normal rather than as a problem, and so is a name with only an AAAA record. A name validated by `dns-01` does not need an address at all. |
+| `dns-alias:<name>` | For a name in `DnsChallengeAliases`, whether `_acme-challenge.<name>` is a CNAME of the alias. Without that CNAME the authority never sees the record written at the alias. |
 | `caa:<name>` | Whether CAA records permit this authority, following the record set on the closest ancestor that has one. It also reads the RFC 8657 `validationmethods` and `accounturi` parameters, which Let's Encrypt enforces, and reports a CAA lookup that fails with `SERVFAIL`, which an authority treats as a refusal. Where the RFCs leave room it reads records as Let's Encrypt does: method names exactly as written, a parameter given twice as permitting nothing, and flag 1 as well as 128 as critical. |
 | `challenge-path:<name>` | Publishes a token of its own and fetches it back over the public name, which is the only check that exercises the whole path the authority takes. |
 

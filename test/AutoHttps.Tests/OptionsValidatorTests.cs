@@ -346,6 +346,65 @@ public class OptionsValidatorTests
     }
 
     [Fact]
+    public void ADnsChallengeAliasIsAccepted()
+    {
+        AutoHttpsOptions options = WithAlias("*.example.com", "example.com", "_acme-challenge.validation.example.net.");
+
+        Assert.True(_validator.Validate(null, options).Succeeded);
+    }
+
+    [Fact]
+    public void AnAliasForANameThatIsNotConfiguredIsReported()
+    {
+        // Almost always a typo, and one that would otherwise surface as a failed validation much later.
+        AutoHttpsOptions options = WithAlias("example.com", "other.example", "other.validation.example.net");
+
+        AssertFails(options, "other.example");
+    }
+
+    [Theory]
+    [InlineData("not a name")]
+    [InlineData("*.validation.example.net")]
+    [InlineData("203.0.113.5")]
+    [InlineData("")]
+    public void AnAliasThatIsNotARecordNameIsReported(string alias)
+    {
+        AutoHttpsOptions options = WithAlias("example.com", "example.com", alias);
+
+        AssertFails(options, nameof(AutoHttpsOptions.DnsChallengeAliases));
+    }
+
+    [Fact]
+    public void AWildcardAndItsApexCannotBeSentToDifferentAliases()
+    {
+        // Both are validated at _acme-challenge.example.com, which can be a CNAME of only one name.
+        AutoHttpsOptions options = WithAlias("*.example.com", "example.com", "a.validation.example.net");
+        options.DomainNames.Add("example.com");
+        options.DnsChallengeAliases["*.example.com"] = "b.validation.example.net";
+
+        AssertFails(options, "_acme-challenge.example.com");
+    }
+
+    [Fact]
+    public void AliasesNeedADnsChallengeProvider()
+    {
+        AutoHttpsOptions options = WithAlias("example.com", "example.com", "example.com.validation.example.net");
+        options.DnsChallengeProvider = null;
+
+        AssertFails(options, nameof(AutoHttpsOptions.DnsChallengeProvider));
+    }
+
+    private static AutoHttpsOptions WithAlias(string domain, string key, string alias)
+    {
+        AutoHttpsOptions options = Valid();
+        options.DomainNames.Clear();
+        options.DomainNames.Add(domain);
+        options.DnsChallengeProvider = new StubDnsProvider();
+        options.DnsChallengeAliases[key] = alias;
+        return options;
+    }
+
+    [Fact]
     public void EveryProblemIsReportedAtOnce()
     {
         // No names, the agreement not accepted, and a malformed address.

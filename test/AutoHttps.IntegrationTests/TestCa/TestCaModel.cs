@@ -109,12 +109,22 @@ internal sealed class TestIssuedCertificate
 }
 
 /// <summary>
-/// The TXT records the test authority will see when validating a <c>dns-01</c> challenge.
+/// The TXT records the test authority will see when validating a <c>dns-01</c> challenge. A name with a
+/// CNAME answers with its target's records only, one hop, the way pebble-challtestsrv does, so a TXT
+/// record left at a delegated name is not seen.
 /// </summary>
 internal sealed class TestDnsZone
 {
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _records =
         new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly ConcurrentDictionary<string, string> _cnames = new(StringComparer.OrdinalIgnoreCase);
+
+    public void SetCname(string name, string target) => _cnames[name] = target;
+
+    /// <summary>Whether the authority, following a CNAME at the name if there is one, finds the value.</summary>
+    public bool Resolves(string name, string value) =>
+        Contains(_cnames.TryGetValue(name, out string? target) ? target : name, value);
 
     public void Add(string name, string value) =>
         _records.GetOrAdd(name, static _ => new ConcurrentDictionary<string, byte>(StringComparer.Ordinal))[value] = 0;

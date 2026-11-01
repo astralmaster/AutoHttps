@@ -316,6 +316,12 @@ internal static partial class Log
     public static partial void AccountInUse(ILogger logger, string accountUrl, Uri authority);
 
     [LoggerMessage(
+        EventId = 158,
+        Level = LogLevel.Debug,
+        Message = "Writing the dns-01 record for {Identifier} at {Alias}, which {ChallengeName} is a CNAME of.")]
+    public static partial void ChallengeRecordDelegated(ILogger logger, string identifier, string alias, string challengeName);
+
+    [LoggerMessage(
         EventId = 159,
         Level = LogLevel.Information,
         Message = "The application asked for a new certificate for {Domains}, so one is being ordered now whatever " +

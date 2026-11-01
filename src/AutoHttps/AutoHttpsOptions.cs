@@ -81,6 +81,21 @@ public sealed class AutoHttpsOptions
     public IDnsChallengeProvider? DnsChallengeProvider { get; set; }
 
     /// <summary>
+    /// Where to write the <c>dns-01</c> record for a domain whose <c>_acme-challenge</c> name is a CNAME
+    /// of a name elsewhere, keyed by the configured domain. The value is the CNAME's target, for example
+    /// <c>example.com.validation.example.net</c> for <c>_acme-challenge.example.com CNAME
+    /// example.com.validation.example.net</c>. The record is written there through
+    /// <see cref="DnsChallengeProvider"/>, so the provider only needs access to the zone that holds the
+    /// alias, and the authority finds it by following the CNAME.
+    /// </summary>
+    /// <remarks>
+    /// A wildcard and its apex are validated at the same name, so one entry, keyed by either, covers both.
+    /// Other names keep their own <c>_acme-challenge</c> record. AutoHttps does not create the CNAME. The
+    /// diagnostics check that it exists when <see cref="DnsPropagationResolver"/> is set.
+    /// </remarks>
+    public IDictionary<string, string> DnsChallengeAliases { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// The challenge type to use when the authority offers a choice. Defaults to <c>http-01</c>.
     /// Set to <c>dns-01</c> when inbound port 80 is not reachable.
     /// </summary>

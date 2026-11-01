@@ -74,6 +74,52 @@ internal static class DomainNormalizer
 
     public static bool IsWildcard(string identifier) => identifier.StartsWith("*.", StringComparison.Ordinal);
 
+    /// <summary>
+    /// Normalizes the name of a DNS record rather than a host: labels may also hold underscores, as in
+    /// <c>_acme-challenge.validation.example.net</c>, and neither a wildcard nor an IP address is one.
+    /// </summary>
+    public static bool TryNormalizeRecordName(string name, out string normalized)
+    {
+        normalized = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        string candidate = name.Trim().TrimEnd('.');
+
+        if (candidate.Length is 0 or > MaxNameLength || IPAddress.TryParse(candidate, out _))
+        {
+            return false;
+        }
+
+        string[] labels = candidate.Split('.');
+        if (labels.Length < 2)
+        {
+            return false;
+        }
+
+        foreach (string label in labels)
+        {
+            if (label.Length is 0 or > MaxLabelLength || label[0] == '-' || label[^1] == '-')
+            {
+                return false;
+            }
+
+            foreach (char c in label)
+            {
+                if (!char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_'))
+                {
+                    return false;
+                }
+            }
+        }
+
+        normalized = candidate.ToLowerInvariant();
+        return true;
+    }
+
     private static bool IsValidHostName(string host)
     {
         if (host.Length is 0 or > MaxNameLength)

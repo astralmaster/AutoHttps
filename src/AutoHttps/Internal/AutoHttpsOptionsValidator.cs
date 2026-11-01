@@ -92,6 +92,8 @@ internal sealed class AutoHttpsOptionsValidator : IValidateOptions<AutoHttpsOpti
                 $"{nameof(AutoHttpsOptions.DnsChallengeProvider)} was supplied.");
         }
 
+        ValidateAliases(options, hasDnsProvider, failures);
+
         if (options.RenewalThreshold is <= 0 or >= 1)
         {
             failures.Add($"{nameof(AutoHttpsOptions.RenewalThreshold)} must be greater than 0 and less than 1.");
@@ -168,6 +170,60 @@ internal sealed class AutoHttpsOptionsValidator : IValidateOptions<AutoHttpsOpti
         return failures.Count == 0
             ? ValidateOptionsResult.Success
             : ValidateOptionsResult.Fail(failures);
+    }
+
+    private static void ValidateAliases(AutoHttpsOptions options, bool hasDnsProvider, List<string> failures)
+    {
+        if (options.DnsChallengeAliases.Count == 0)
+        {
+            return;
+        }
+
+        const string Aliases = nameof(AutoHttpsOptions.DnsChallengeAliases);
+
+        if (!hasDnsProvider)
+        {
+            failures.Add(
+                $"{Aliases} sends dns-01 records to other names, which needs {nameof(AutoHttpsOptions.DnsChallengeProvider)} " +
+                "to write them, and none was supplied.");
+        }
+
+        var configured = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string domain in DomainNormalizer.Normalize(options.DomainNames))
+        {
+            configured.Add(DnsChallengeNames.BaseName(domain));
+        }
+
+        var targets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (KeyValuePair<string, string> alias in options.DnsChallengeAliases)
+        {
+            if (!DomainNormalizer.TryNormalize(alias.Key, out string key) || !configured.Contains(DnsChallengeNames.BaseName(key)))
+            {
+                failures.Add($"{Aliases} has an entry for '{alias.Key}', which is not one of the {nameof(AutoHttpsOptions.DomainNames)}.");
+                continue;
+            }
+
+            if (!DomainNormalizer.TryNormalizeRecordName(alias.Value, out string target))
+            {
+                failures.Add(
+                    $"{Aliases} sends '{alias.Key}' to '{alias.Value}', which is not a DNS record name. Give the name " +
+                    $"_acme-challenge.{DnsChallengeNames.BaseName(key)} is a CNAME of.");
+                continue;
+            }
+
+            // A wildcard and its apex share one challenge name, which can be a CNAME of only one target.
+            string challengeName = DnsChallengeNames.ForIdentifier(key);
+            if (targets.TryGetValue(challengeName, out string? earlier) && !string.Equals(earlier, target, StringComparison.Ordinal))
+            {
+                failures.Add(
+                    $"{Aliases} sends {challengeName} to both '{earlier}' and '{target}'. A wildcard and its apex are " +
+                    "validated at that one name, which can be a CNAME of only one of them.");
+                continue;
+            }
+
+            targets[challengeName] = target;
+        }
     }
 
     private bool HasDnsProvider(AutoHttpsOptions options) =>

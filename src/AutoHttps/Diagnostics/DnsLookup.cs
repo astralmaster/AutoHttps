@@ -13,6 +13,7 @@ internal readonly record struct DnsRecordType(string Name, int Number)
     public static readonly DnsRecordType A = new("A", 1);
     public static readonly DnsRecordType Aaaa = new("AAAA", 28);
     public static readonly DnsRecordType Caa = new("CAA", 257);
+    public static readonly DnsRecordType Cname = new("CNAME", 5);
 }
 
 /// <summary>

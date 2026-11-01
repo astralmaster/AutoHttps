@@ -518,6 +518,110 @@ public class Dns01ChallengeHandlerTests
         Assert.Equal([("delete", "_acme-challenge.example.com", "digest-value")], provider.Calls.ToArray()[1..]);
     }
 
+    // CNAME delegation: _acme-challenge.<name> is a CNAME of a name in a zone the provider can write,
+    // so the record goes there. The authority follows the CNAME when it validates.
+
+    [Fact]
+    public async Task WithAnAliasTheRecordIsWrittenAtTheAliasAndRemovedFromThere()
+    {
+        var provider = new RecordingProvider();
+        var aliases = new Dictionary<string, string> { ["example.com"] = "example.com.validation.example.net." };
+        var handler = new Dns01ChallengeHandler(provider, TimeSpan.Zero, TimeProvider.System, aliases);
+
+        // A wildcard is validated at its apex's challenge name, so it shares the apex's entry.
+        var context = new ChallengeContext("dns", "*.example.com", "token", "token.thumb", "digest-value");
+
+        await handler.PrepareAsync(context, CancellationToken.None);
+        await handler.CleanupAsync(context, CancellationToken.None);
+
+        Assert.Equal(
+            [("create", "example.com.validation.example.net", "digest-value"), ("delete", "example.com.validation.example.net", "digest-value")],
+            provider.Calls.ToArray());
+    }
+
+    [Theory]
+    [InlineData("Example.COM")]
+    [InlineData("example.com.")]
+    [InlineData("*.example.com")]
+    public async Task AnAliasKeyMatchesWhateverItsCaseTrailingDotOrWildcard(string key)
+    {
+        var provider = new RecordingProvider();
+        var handler = new Dns01ChallengeHandler(
+            provider, TimeSpan.Zero, TimeProvider.System, new Dictionary<string, string> { [key] = "_acme-challenge.validation.example.net" });
+
+        await handler.PrepareAsync(new ChallengeContext("dns", "example.com", "t", "t.k", "v"), CancellationToken.None);
+
+        Assert.Equal("_acme-challenge.validation.example.net", provider.Calls[0].Name);
+    }
+
+    [Fact]
+    public async Task ANameWithoutAnAliasKeepsTheUsualRecordName()
+    {
+        var provider = new RecordingProvider();
+        var handler = new Dns01ChallengeHandler(
+            provider, TimeSpan.Zero, TimeProvider.System, new Dictionary<string, string> { ["example.com"] = "example.com.validation.example.net" });
+
+        await handler.PrepareAsync(new ChallengeContext("dns", "www.example.com", "t", "t.k", "v"), CancellationToken.None);
+
+        Assert.Equal("_acme-challenge.www.example.com", provider.Calls[0].Name);
+    }
+
+    [Fact]
+    public async Task WithAnAliasThePropagationCheckReadsTheNameTheAuthorityReads()
+    {
+        // Polling the alias would pass while the CNAME is missing. Polling the challenge name through a
+        // recursive resolver sees the record only by way of the CNAME, as the authority will.
+        var doh = new NameRecordingDoh();
+        var checker = new DnsPropagationChecker(
+            new SingleHandlerFactory(doh),
+            Microsoft.Extensions.Options.Options.Create(new AutoHttpsOptions { DnsPropagationResolver = new Uri("https://doh.example/resolve") }),
+            TimeProvider.System,
+            NullLogger<DnsPropagationChecker>.Instance);
+
+        var handler = new Dns01ChallengeHandler(
+            new RecordingProvider(),
+            TimeSpan.Zero,
+            TimeProvider.System,
+            new Dictionary<string, string> { ["example.com"] = "example.com.validation.example.net" },
+            checker);
+
+        await handler.PrepareAsync(new ChallengeContext("dns", "example.com", "t", "t.k", "the-value"), CancellationToken.None);
+
+        Assert.Equal(["_acme-challenge.example.com"], doh.Names.ToArray());
+    }
+
+    private sealed class NameRecordingDoh : System.Net.Http.HttpMessageHandler
+    {
+        public ConcurrentQueue<string> Names { get; } = new();
+
+        protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(
+            System.Net.Http.HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            string query = request.RequestUri!.Query;
+            int start = query.IndexOf("name=", StringComparison.Ordinal) + "name=".Length;
+            int end = query.IndexOf('&', start);
+            Names.Enqueue(Uri.UnescapeDataString(query[start..end]));
+
+            return Task.FromResult(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new System.Net.Http.StringContent(
+                    """{"Status":0,"Answer":[{"type":5,"data":"example.com.validation.example.net."},{"type":16,"data":"\"the-value\""}]}""",
+                    Encoding.UTF8,
+                    "application/dns-json"),
+            });
+        }
+    }
+
+    private sealed class SingleHandlerFactory : System.Net.Http.IHttpClientFactory
+    {
+        private readonly System.Net.Http.HttpMessageHandler _handler;
+
+        public SingleHandlerFactory(System.Net.Http.HttpMessageHandler handler) => _handler = handler;
+
+        public System.Net.Http.HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
+    }
+
     [Fact]
     public async Task PrepareWaitsForTheConfiguredPropagationDelay()
     {

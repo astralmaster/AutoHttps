@@ -754,7 +754,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
         if (challenge.Type == "dns-01")
         {
             string expected = TestJws.Encode(SHA256.HashData(Encoding.UTF8.GetBytes(keyAuthorization)));
-            return Dns.Contains("_acme-challenge." + authorization.Identifier.BaseValue, expected);
+            return Dns.Resolves("_acme-challenge." + authorization.Identifier.BaseValue, expected);
         }
 
         if (HttpChallengeResolver?.Invoke(authorization.Identifier.Value) is not { } target)

@@ -86,6 +86,17 @@ public sealed class PebbleFixture : IAsyncLifetime
         PostAsync("clear-txt", new { host = Qualify(host) });
 
     /// <summary>
+    /// Makes <paramref name="host"/> a CNAME of <paramref name="target"/>. challtestsrv then answers a
+    /// query for the host with the CNAME and the target's records, one hop, and a TXT record left at
+    /// the host itself is no longer seen.
+    /// </summary>
+    public Task SetCnameAsync(string host, string target) =>
+        PostAsync("set-cname", new { host = Qualify(host), target = Qualify(target) });
+
+    public Task ClearCnameAsync(string host) =>
+        PostAsync("clear-cname", new { host = Qualify(host) });
+
+    /// <summary>
     /// What Pebble's management interface says about a certificate it issued, for example "Valid" or
     /// "Revoked", looked up by serial number.
     /// </summary>

@@ -734,6 +734,60 @@ public class AutoHttpsDiagnosticsTests
         Assert.Contains("InMemoryStore", check.Detail, StringComparison.Ordinal);
     }
 
+    // CNAME delegation. The record is written at the alias, and the authority only finds it there by
+    // following a CNAME at the challenge name, which nothing in AutoHttps creates.
+
+    [Fact]
+    public async Task ADelegatedChallengeNameThatPointsAtTheAliasPasses()
+    {
+        var routes = new Routes
+        {
+            Dns = (name, type) => type == DnsRecordType.Cname && name == "_acme-challenge.app.example.com"
+                ? (DnsLookup.NoError, ["App.Example.com.validation.example.net."], false)
+                : DefaultDns(name, type),
+        };
+
+        AutoHttpsCheck check = Find(await RunAsync(routes, Alias), "dns-alias:app.example.com");
+
+        Assert.Equal(AutoHttpsCheckOutcome.Passed, check.Outcome);
+    }
+
+    [Fact]
+    public async Task AChallengeNameWithNoCnameFails()
+    {
+        AutoHttpsCheck check = Find(await RunAsync(new Routes(), Alias), "dns-alias:app.example.com");
+
+        Assert.Equal(AutoHttpsCheckOutcome.Failed, check.Outcome);
+        Assert.Contains("_acme-challenge.app.example.com CNAME app.example.com.validation.example.net", check.Remedy!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AChallengeNamePointingElsewhereFails()
+    {
+        var routes = new Routes
+        {
+            Dns = (name, type) => type == DnsRecordType.Cname && name == "_acme-challenge.app.example.com"
+                ? (DnsLookup.NoError, ["somewhere.else.example."], false)
+                : DefaultDns(name, type),
+        };
+
+        AutoHttpsCheck check = Find(await RunAsync(routes, Alias), "dns-alias:app.example.com");
+
+        Assert.Equal(AutoHttpsCheckOutcome.Failed, check.Outcome);
+        Assert.Contains("somewhere.else.example", check.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ANameWithoutAnAliasGetsNoDelegationCheck()
+    {
+        AutoHttpsDiagnosticsReport report = await RunAsync(new Routes());
+
+        Assert.DoesNotContain(report.Checks, check => check.Name.StartsWith("dns-alias:", StringComparison.Ordinal));
+    }
+
+    private static void Alias(AutoHttpsOptions options) =>
+        options.DnsChallengeAliases["app.example.com"] = "app.example.com.validation.example.net";
+
     // Harness
 
     private static AutoHttpsCheck Find(AutoHttpsDiagnosticsReport report, string name) =>
@@ -866,6 +920,7 @@ public class AutoHttpsDiagnosticsTests
             {
                 "A" => DnsRecordType.A,
                 "AAAA" => DnsRecordType.Aaaa,
+                "CNAME" => DnsRecordType.Cname,
                 _ => DnsRecordType.Caa,
             };
 

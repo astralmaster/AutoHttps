@@ -393,6 +393,65 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
             string name = wildcard ? domain[2..] : domain;
             checks.Add(await CheckOneNameAsync(resolver, name, needsAddress, cancellationToken));
         }
+
+        // An alias works only through a CNAME that AutoHttps does not create, and a missing one fails
+        // every validation for that name, so each delegated name is checked once.
+        IReadOnlyDictionary<string, string> aliases = DnsChallengeNames.Normalize(_options.DnsChallengeAliases);
+        var checkedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string domain in domains)
+        {
+            string baseName = DnsChallengeNames.BaseName(domain);
+            if (aliases.TryGetValue(baseName, out string? alias) && checkedNames.Add(baseName))
+            {
+                checks.Add(await CheckAliasAsync(resolver, baseName, alias, cancellationToken));
+            }
+        }
+    }
+
+    private async Task<AutoHttpsCheck> CheckAliasAsync(Uri resolver, string baseName, string alias, CancellationToken cancellationToken)
+    {
+        string check = "dns-alias:" + baseName;
+        string challengeName = DnsChallengeNames.ForIdentifier(baseName);
+        string record = $"{challengeName} CNAME {alias}";
+
+        DnsLookupResult? result = await _dns.QueryAsync(resolver, challengeName, DnsRecordType.Cname, cancellationToken);
+        if (result is not { } cname)
+        {
+            return new AutoHttpsCheck(check, AutoHttpsCheckOutcome.Warning, $"'{resolver}' could not be reached or did not answer in the DNS JSON format");
+        }
+
+        if (cname.Status == DnsLookup.ServerFailure)
+        {
+            return new AutoHttpsCheck(
+                check,
+                AutoHttpsCheckOutcome.Failed,
+                $"the resolver answered SERVFAIL for {challengeName}, so the authority cannot follow it to {alias} either",
+                "check the zone holding the CNAME and the one holding the alias on dnsviz.net. A broken DNSSEC chain in either fails the lookup");
+        }
+
+        string[] targets = [.. cname.Records.Select(static target => target.TrimEnd('.'))];
+
+        if (targets.Any(target => string.Equals(target, alias, StringComparison.OrdinalIgnoreCase)))
+        {
+            return new AutoHttpsCheck(check, AutoHttpsCheckOutcome.Passed, $"{challengeName} is a CNAME of {alias}, where the record is written");
+        }
+
+        if (targets.Length > 0)
+        {
+            return new AutoHttpsCheck(
+                check,
+                AutoHttpsCheckOutcome.Failed,
+                $"{challengeName} is a CNAME of {string.Join(", ", targets)}, not of {alias}, where DnsChallengeAliases writes the record, " +
+                "so the authority will not find it",
+                $"point the CNAME at {alias}, or change the alias to the name it points at");
+        }
+
+        return new AutoHttpsCheck(
+            check,
+            AutoHttpsCheckOutcome.Failed,
+            $"{challengeName} has no CNAME, so the authority reads that name itself and never sees the record written at {alias}",
+            $"create the record {record}");
     }
 
     private async Task<AutoHttpsCheck> CheckOneNameAsync(Uri resolver, string name, bool needsAddress, CancellationToken cancellationToken)
