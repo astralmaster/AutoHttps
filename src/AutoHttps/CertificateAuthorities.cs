@@ -40,10 +40,16 @@ public static class CertificateAuthorities
 /// </summary>
 public static class CertificateProfiles
 {
-    /// <summary>The historical profile, issuing certificates with a 90 day lifetime.</summary>
+    /// <summary>
+    /// Let's Encrypt's default, used when no profile is requested. Its certificates last 90 days, then
+    /// 64 days from 2027-02-10 and 45 days from 2028-02-16.
+    /// </summary>
     public const string Classic = "classic";
 
-    /// <summary>The current default profile, issuing certificates with a 45 day lifetime.</summary>
+    /// <summary>
+    /// Certificates with a 45 day lifetime and no subject common name. It is not the default and is only
+    /// used when requested by name.
+    /// </summary>
     public const string TlsServer = "tlsserver";
 
     /// <summary>

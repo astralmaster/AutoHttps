@@ -32,8 +32,9 @@ longer supported, so the package isn't recommended for use", and names no replac
 
 Meanwhile the certificate world moved:
 
-- Let's Encrypt now issues **six-day certificates** and is taking the default lifetime from 90 days
-  down to 45. A client that renews on a fixed 30-day threshold cannot cope with either.
+- Let's Encrypt now issues **six-day certificates** and is cutting the default lifetime from 90 days
+  to 64 on 2027-02-10 and to 45 on 2028-02-16. A client that renews on a fixed 30-day threshold cannot
+  cope with either.
 - **ACME Renewal Information** became [RFC 9773](https://www.rfc-editor.org/rfc/rfc9773.html) in
   September 2025. Authorities now tell clients *when* to renew, and expect to be asked.
 - **Certificate profiles** are how you opt into the shorter lifetimes.
