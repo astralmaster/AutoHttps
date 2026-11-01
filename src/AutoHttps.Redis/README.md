@@ -43,8 +43,10 @@ cannot reach as a failed attempt and tries again.
 Instances sharing a certificate also share its renewal time, so without a shared lock they would all
 order at the same moment. The lock is a key set only if absent, with a lease the holder renews while
 its order runs, so an instance that dies holding it keeps the others waiting for one lease at most
-(`LockLease`, a minute by default). To use a lock of your own instead, call `UseDistributedLock<T>()`
-after `UseRedis`.
+(`LockLease`, a minute by default). A holder that loses its lease while still holding the lock, through a
+Redis outage longer than the lease, an eviction or a failover, logs a warning (event 160) and stops
+renewing it, because another instance may be ordering the same certificate by then. To use a lock of
+your own instead, call `UseDistributedLock<T>()` after `UseRedis`.
 
 Sharing the challenge store is what lets replicas behind a single DNS name pass an `http-01`
 validation. The authority's request lands on whichever replica the load balancer picks, which is not

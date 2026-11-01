@@ -1,6 +1,9 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using Xunit;
@@ -120,6 +123,73 @@ public sealed class RedisLockTests
         await current!.DisposeAsync();
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ALeaseLostWhileHeldIsReportedOnce(bool takenOver)
+    {
+        // A holder cut off from Redis for longer than its lease, or one whose key was evicted or lost in a
+        // failover, no longer holds the lock, and another instance may be ordering the same certificate.
+        // Carrying on silently hid that the lock had stopped doing its job.
+        RedisStoreOptions options = FreshOptions();
+        options.LockLease = TimeSpan.FromMilliseconds(600);
+        var log = new RecordingLogger();
+
+        IAsyncDisposable? held = await new RedisDistributedLock(_redis.Multiplexer, Options.Create(options), log)
+            .TryAcquireAsync(Name, CancellationToken.None);
+        Assert.NotNull(held);
+
+        IDatabase database = _redis.Multiplexer.GetDatabase();
+        if (takenOver)
+        {
+            await database.StringSetAsync(Key(options), "another-instance", TimeSpan.FromMinutes(1));
+        }
+        else
+        {
+            await database.KeyDeleteAsync(Key(options));
+        }
+
+        // Several renewal ticks, each a third of the lease.
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+
+        Assert.Equal(1, log.CountOf(160));
+
+        await held!.DisposeAsync();
+
+        if (takenOver)
+        {
+            // Neither extended nor released: the key is the other instance's.
+            Assert.Equal("another-instance", (string?)await database.StringGetAsync(Key(options)));
+            Assert.True(await database.KeyTimeToLiveAsync(Key(options)) > TimeSpan.FromSeconds(50));
+        }
+    }
+
+    [Fact]
+    public async Task TheLockTheContainerBuildsReportsThroughTheApplicationsLog()
+    {
+        // The lock has a constructor with a logger and one without. The container has to take the first,
+        // or the warning above never reaches the application's log.
+        RedisStoreOptions options = FreshOptions();
+        options.LockLease = TimeSpan.FromMilliseconds(600);
+        var log = new RecordingLogger();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IConnectionMultiplexer>(_redis.Multiplexer);
+        services.AddSingleton<ILogger<RedisDistributedLock>>(log);
+        services.AddSingleton(Options.Create(options));
+        services.AddSingleton<RedisDistributedLock>();
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        IAsyncDisposable? held = await provider.GetRequiredService<RedisDistributedLock>().TryAcquireAsync(Name, CancellationToken.None);
+        Assert.NotNull(held);
+
+        await _redis.Multiplexer.GetDatabase().KeyDeleteAsync(Key(options));
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+
+        Assert.Equal(1, log.CountOf(160));
+        await held!.DisposeAsync();
+    }
+
     [Fact]
     public async Task ReleasingTheLockRemovesItsKey()
     {
@@ -144,4 +214,19 @@ public sealed class RedisLockTests
     // A unique prefix per test keeps them from colliding on the shared Redis.
     private static RedisStoreOptions FreshOptions() =>
         new() { KeyPrefix = "autohttps-test:" + Guid.NewGuid().ToString("n") + ":" };
+
+    private sealed class RecordingLogger : ILogger<RedisDistributedLock>
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<int> _events = new();
+
+        public int CountOf(int eventId) => _events.Count(id => id == eventId);
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            _events.Enqueue(eventId.Id);
+    }
 }
