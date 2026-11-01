@@ -537,8 +537,13 @@ internal sealed class AutoHttpsService : BackgroundService
         // still the best thing available, and ordering another would just produce the same result:
         // authorities differ on how far they backdate, and a machine whose clock has not synced
         // sees its own fresh certificate as being from the future.
+        // Nor is one that started before the certificate in use: a store write that failed leaves an
+        // older certificate behind, and taking it while a renewal request waits would meet the request
+        // with it, after which the caller revokes the newer one.
         DateTimeOffset now = _time.GetUtcNow();
-        bool usable = candidate.NotAfter > now && !IsSameCertificate(_current, candidate);
+        bool usable = candidate.NotAfter > now &&
+                      !IsSameCertificate(_current, candidate) &&
+                      (_current is null || candidate.NotBefore > _current.NotBefore);
 
         if (!usable)
         {

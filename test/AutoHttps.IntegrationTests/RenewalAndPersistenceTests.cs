@@ -215,6 +215,36 @@ public class RenewalAndPersistenceTests
     }
 
     [Fact]
+    public async Task AnOlderCertificateInTheStoreDoesNotMeetARenewalRequest()
+    {
+        // A store write that failed (event 115) leaves an older certificate there than the one served.
+        // Taking it while a request waited met the request with that old certificate, and the caller then
+        // revoked the newer one that had been in use.
+        using var storage = new TempStorage();
+        using var elsewhere = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        string older = await IssueIntoAsync(authority, elsewhere);
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+
+        await using TestApplication app = await TestApplication.StartAsync(authority, Configure(storage));
+        string served = (await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout)).Leaf.Thumbprint;
+
+        CopyStoredCertificate(elsewhere, storage);
+
+        await app.Services.GetRequiredService<IAutoHttpsCertificateManager>()
+            .RenewAsync(RevocationReason.KeyCompromise)
+            .WaitAsync(IssuanceTimeout);
+
+        string now = app.FindCertificate("app.example.com")!.Leaf.Thumbprint;
+        Assert.NotEqual(older, now);
+        Assert.NotEqual(served, now);
+        Assert.Equal(3, authority.OrderCount);
+        Assert.Equal((int)RevocationReason.KeyCompromise, authority.Revocations[served]);
+        Assert.False(authority.Revocations.ContainsKey(older));
+    }
+
+    [Fact]
     public async Task ANewerCertificateWithAnotherKindOfKeyIsNotAdopted()
     {
         // During a rolling change of KeyAlgorithm, replicas on the old and the new setting share the store.
