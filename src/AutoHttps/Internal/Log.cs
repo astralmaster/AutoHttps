@@ -309,6 +309,13 @@ internal static partial class Log
     public static partial void StoredCertificateRemoved(ILogger logger, string domains);
 
     [LoggerMessage(
+        EventId = 157,
+        Level = LogLevel.Information,
+        Message = "Ordering certificates with the ACME account {AccountUrl} at {Authority}. A CAA record limits " +
+                  "issuance for these names to this account when its issue value carries accounturi with this URL.")]
+    public static partial void AccountInUse(ILogger logger, string accountUrl, Uri authority);
+
+    [LoggerMessage(
         EventId = 159,
         Level = LogLevel.Information,
         Message = "The application asked for a new certificate for {Domains}, so one is being ordered now whatever " +

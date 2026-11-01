@@ -591,7 +591,8 @@ internal sealed class AutoHttpsDiagnostics : IAutoHttpsDiagnostics
                     AutoHttpsCheckOutcome.Warning,
                     $"the CAA records on '{candidate}' permit {authority} only for the ACME account they name (accounturi), " +
                     $"and this application has not registered or looked up its account yet, so it cannot tell whether that is this one: {found}",
-                    "make sure accounturi names this application's account URL, which is logged at Debug once it is known"),
+                    "make sure accounturi names this application's account URL, which is logged as event 157 once it " +
+                    "is known and shown by IAutoHttpsCertificateInspector as AccountUrl"),
                 CaaVerdict.UnknownCritical => new AutoHttpsCheck(
                     check,
                     AutoHttpsCheckOutcome.Warning,

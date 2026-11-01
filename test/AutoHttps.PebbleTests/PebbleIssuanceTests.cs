@@ -357,6 +357,7 @@ public class PebbleIssuanceTests
         using var storage = new TempStorage();
         string domain = NewDomain();
 
+        Uri? registered;
         await using (PebbleApplication first = await PebbleApplication.StartAsync(_pebble, options =>
         {
             options.DomainNames.Add(domain);
@@ -365,6 +366,11 @@ public class PebbleIssuanceTests
         {
             await first.WaitForCertificateAsync(domain, Timeout);
             Assert.True(first.Log.CountOf(103) > 0, "The first start never registered an account.");
+
+            // The URL a CAA accounturi has to name, as Pebble's newAccount returned it.
+            registered = first.Services.GetRequiredService<IAutoHttpsCertificateInspector>().GetStatus().AccountUrl;
+            Assert.StartsWith("https://localhost:14000/my-account/", registered?.AbsoluteUri, StringComparison.Ordinal);
+            Assert.Equal(1, first.Log.CountOf(157));
         }
 
         // Only the account key is left, so the next start has to order and needs the account to do it.
@@ -385,6 +391,9 @@ public class PebbleIssuanceTests
             second.Log.CountOf(152) > 0,
             "Pebble did not answer the lookup for the stored key:" + Environment.NewLine + second.Log.Describe());
         Assert.Equal(0, second.Log.CountOf(103));
+
+        // The lookup found the same account, and it is shown the same way.
+        Assert.Equal(registered, second.Services.GetRequiredService<IAutoHttpsCertificateInspector>().GetStatus().AccountUrl);
     }
 
     [Fact]

@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using AutoHttps.Certificates;
 using AutoHttps.IntegrationTests.TestCa;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace AutoHttps.IntegrationTests;
@@ -75,6 +76,30 @@ public sealed class AccountChangeTests
         Assert.False(authority.SawReplaces);
         Assert.Equal(0, second.Log.CountOf(148));
         Assert.True(second.Log.CountOf(110) > 0, "The refused order was not reported as a failed attempt." + Environment.NewLine + second.Log.Describe());
+    }
+
+    [Fact]
+    public async Task TheAccountUrlIsShownByTheInspectorAndLoggedOnce()
+    {
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        await using TestApplication app = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+        });
+
+        await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
+
+        Uri? accountUrl = app.Services.GetRequiredService<IAutoHttpsCertificateInspector>().GetStatus().AccountUrl;
+        Assert.NotNull(accountUrl);
+        Assert.Contains("/account/", accountUrl!.AbsoluteUri, StringComparison.Ordinal);
+
+        // A second order uses the same account, which is not news.
+        await app.Services.GetRequiredService<IAutoHttpsCertificateManager>().RenewAsync().WaitAsync(IssuanceTimeout);
+
+        Assert.Equal(1, app.Log.CountOf(157));
+        Assert.Contains(app.Log.Entries, entry => entry.Contains(accountUrl.AbsoluteUri, StringComparison.Ordinal) && entry.Contains("[157]", StringComparison.Ordinal));
     }
 
     private static async Task<string> IssueAsync(TestCertificateAuthority authority, TempStorage storage, string email)

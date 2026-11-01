@@ -611,6 +611,7 @@ exists for diagnosis, not alerting.
 | 154 | Information | Certificates are kept in a store other instances can share, but the lock is still a local file. Fine for one instance, while several need `UseDistributedLock`. Logged once at startup. |
 | 155 | Information | The authority explained the renewal window it set, typically because it moved renewal forward for a revocation. The message carries the URL. Logged once per URL. |
 | 156 | Information | The stored certificate for the configured names was removed, so a new one is being ordered. The previous certificate is served until it arrives. |
+| 157 | Information | The ACME account certificates are ordered with, by URL, which is what a CAA `accounturi` has to name. Logged once, when the account is registered or found. |
 | 159 | Information | The application asked for a new certificate with `RenewAsync`, so one is being ordered whatever the renewal schedule says. |
 | 110 | Warning | An order failed and will be retried. The reason is in the message; the stack trace is logged separately at Debug as event 124. |
 | 112 | Warning | A self-signed fallback is being served, logged once rather than per handshake. |
@@ -801,7 +802,11 @@ app.MapGet("/tls", (IAutoHttpsCertificateInspector inspector) =>
 ```
 
 The status also carries `ConsecutiveFailures`, `LastFailureAt` and `LastFailureReason`, so a status
-page can show that renewal is failing before the certificate gets close to expiring.
+page can show that renewal is failing before the certificate gets close to expiring. `AccountUrl` is the
+ACME account certificates are ordered with, once it is registered or found. To let only that account
+issue for your names, put it in the CAA record's `accounturi` (RFC 8657), for example
+`0 issue "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123456"`. The account
+changes with `EmailAddress` or a new account key, so update the record when either does.
 
 ### Replacing and revoking a certificate
 

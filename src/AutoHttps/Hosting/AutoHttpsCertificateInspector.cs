@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace AutoHttps.Hosting;
@@ -7,8 +8,18 @@ internal sealed class AutoHttpsCertificateInspector : IAutoHttpsCertificateInspe
     private static readonly IReadOnlyList<string> NoNames = [];
 
     private readonly AutoHttpsState _state;
+    private readonly Func<string?> _accountUrl;
 
-    public AutoHttpsCertificateInspector(AutoHttpsState state) => _state = state;
+    public AutoHttpsCertificateInspector(AutoHttpsState state, AcmeSession session)
+        : this(state, () => session.AccountUrl)
+    {
+    }
+
+    internal AutoHttpsCertificateInspector(AutoHttpsState state, Func<string?>? accountUrl = null)
+    {
+        _state = state;
+        _accountUrl = accountUrl ?? (static () => null);
+    }
 
     public AutoHttpsCertificateStatus GetStatus()
     {
@@ -25,6 +36,7 @@ internal sealed class AutoHttpsCertificateInspector : IAutoHttpsCertificateInspe
             snapshot.RenewalScheduledAt,
             snapshot.ConsecutiveFailures,
             snapshot.LastFailureAt,
-            snapshot.LastFailureReason);
+            snapshot.LastFailureReason,
+            _accountUrl() is { } accountUrl ? new Uri(accountUrl) : null);
     }
 }

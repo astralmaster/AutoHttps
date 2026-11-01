@@ -29,7 +29,8 @@ public sealed class AutoHttpsCertificateStatus
         DateTimeOffset? renewalScheduledAt,
         int consecutiveFailures,
         DateTimeOffset? lastFailureAt,
-        string? lastFailureReason)
+        string? lastFailureReason,
+        Uri? accountUrl = null)
     {
         Domains = domains;
         HasCertificate = hasCertificate;
@@ -41,6 +42,7 @@ public sealed class AutoHttpsCertificateStatus
         ConsecutiveFailures = consecutiveFailures;
         LastFailureAt = lastFailureAt;
         LastFailureReason = lastFailureReason;
+        AccountUrl = accountUrl;
     }
 
     /// <summary>The domains AutoHttps is managing.</summary>
@@ -83,4 +85,11 @@ public sealed class AutoHttpsCertificateStatus
     /// sentence logged as event 110.
     /// </summary>
     public string? LastFailureReason { get; }
+
+    /// <summary>
+    /// The URL of the ACME account certificates are ordered with, or <see langword="null"/> until the
+    /// account has been registered or found. A CAA record's <c>accounturi</c> parameter has to name it
+    /// exactly to limit issuance for these names to this account (RFC 8657).
+    /// </summary>
+    public Uri? AccountUrl { get; }
 }

@@ -37,6 +37,20 @@ public class CertificateInspectorAndHealthTests
     }
 
     [Fact]
+    public void TheInspectorShowsTheAccountUrlOnceItIsKnown()
+    {
+        // A CAA accounturi has to name the account exactly, and it was only ever logged at Debug.
+        var state = new AutoHttpsState();
+        string? accountUrl = null;
+        var inspector = new AutoHttpsCertificateInspector(state, () => accountUrl);
+
+        Assert.Null(inspector.GetStatus().AccountUrl);
+
+        accountUrl = "https://acme.example/acme/acct/123456";
+        Assert.Equal(new Uri("https://acme.example/acme/acct/123456"), inspector.GetStatus().AccountUrl);
+    }
+
+    [Fact]
     public void TheInspectorReflectsTheServedCertificate()
     {
         var time = new FakeTimeProvider(Now);

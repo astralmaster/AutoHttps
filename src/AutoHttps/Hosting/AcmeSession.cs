@@ -23,6 +23,7 @@ internal sealed class AcmeSession : IDisposable
     private AcmeKey? _accountKey;
     private bool _keyFromStore;
     private bool _registered;
+    private string? _announcedAccount;
 
     public AcmeSession(
         IHttpClientFactory httpClientFactory,
@@ -70,6 +71,7 @@ internal sealed class AcmeSession : IDisposable
 
                 await PersistAccountKeyAsync(cancellationToken);
                 Volatile.Write(ref _registered, true);
+                AnnounceAccount(client.AccountUrl);
             }
 
             return client;
@@ -154,6 +156,21 @@ internal sealed class AcmeSession : IDisposable
         {
             await _accountKeyStore.SaveAsync(name, _accountKey.ExportPem(), cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// Logs the account URL at Information the first time it is known, and again only if it changes.
+    /// It is what a CAA accounturi has to name, and the registration itself is logged only at Debug.
+    /// </summary>
+    private void AnnounceAccount(string? accountUrl)
+    {
+        if (accountUrl is null || string.Equals(_announcedAccount, accountUrl, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _announcedAccount = accountUrl;
+        Log.AccountInUse(_logger, accountUrl, _options.CertificateAuthority);
     }
 
     private string AccountKeyName => StoreKey.ForAccount(_options.CertificateAuthority, _options.EmailAddress ?? string.Empty);
