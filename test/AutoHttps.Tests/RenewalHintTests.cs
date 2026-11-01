@@ -43,6 +43,13 @@ public sealed class RenewalHintTests
             new AcmeException("broken", "urn:ietf:params:acme:error:serverInternal", "detail", status)));
 
     [Fact]
+    public void ARefusedProfileKeepsTheHint() =>
+        // draft-ietf-acme-profiles: invalidProfile is about the profile, and an order without the hint
+        // would be refused for the same reason.
+        Assert.False(CertificateAcquirer.IsRenewalRefused(
+            new AcmeException("profile", "urn:ietf:params:acme:error:invalidProfile", "detail", 400)));
+
+    [Fact]
     public void AFailureBeforeAnythingWasSentKeepsTheHint() =>
         Assert.False(CertificateAcquirer.IsRenewalRefused(new AcmeException("the profile is not offered")));
 }

@@ -501,7 +501,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
             }
         }
 
-        if (profile is not null && Behavior.AdvertiseProfiles &&
+        if (profile is not null && (Behavior.AdvertiseProfiles || Behavior.RejectUnknownProfiles) &&
             profile is not (CertificateProfiles.Classic or CertificateProfiles.TlsServer or CertificateProfiles.ShortLived))
         {
             await WriteProblemAsync(

@@ -158,4 +158,7 @@ internal static class AcmeErrorTypes
     public const string Connection = "urn:ietf:params:acme:error:connection";
     public const string Unauthorized = "urn:ietf:params:acme:error:unauthorized";
     public const string IncorrectResponse = "urn:ietf:params:acme:error:incorrectResponse";
+
+    /// <summary>The order asked for a profile the authority refuses (draft-ietf-acme-profiles).</summary>
+    public const string InvalidProfile = "urn:ietf:params:acme:error:invalidProfile";
 }

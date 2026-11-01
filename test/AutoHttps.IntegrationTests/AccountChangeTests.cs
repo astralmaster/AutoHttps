@@ -79,6 +79,43 @@ public sealed class AccountChangeTests
     }
 
     [Fact]
+    public async Task AProfileTheAuthorityRefusesIsReportedAsSuchAndNotOrderedAgainWithoutTheHint()
+    {
+        // A directory that does not list its profiles leaves an unknown one for the authority to refuse,
+        // with invalidProfile. That has nothing to do with the renewal hint, so ordering again without it
+        // repeats the request, reports an account change that never happened, and names the wrong cause.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        authority.Behavior.CertificateLifetime = TimeSpan.FromMinutes(10);
+        authority.Behavior.AdvertiseProfiles = false;
+        authority.Behavior.RejectUnknownProfiles = true;
+
+        await IssueAsync(authority, storage, "operator@example.com");
+
+        await using TestApplication second = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+            options.UseRenewalInformation = false;
+            options.RenewalThreshold = 0.999;
+            options.Profile = "no-such-profile";
+        });
+
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + IssuanceTimeout;
+        while (second.Log.CountOf(110) == 0 && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(100);
+        }
+
+        string? reason = second.Services.GetRequiredService<IAutoHttpsCertificateInspector>().GetStatus().LastFailureReason;
+        Assert.NotNull(reason);
+        Assert.Contains("AutoHttpsOptions.Profile", reason, StringComparison.Ordinal);
+        Assert.Contains("no-such-profile", reason, StringComparison.Ordinal);
+        Assert.True(authority.SawReplaces);
+        Assert.Equal(0, second.Log.CountOf(148));
+    }
+
+    [Fact]
     public async Task WithoutAnEmailAddressTheAccountIsRegisteredWithNoContact()
     {
         using var storage = new TempStorage();

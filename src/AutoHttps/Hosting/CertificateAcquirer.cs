@@ -135,38 +135,51 @@ internal sealed class CertificateAcquirer
 
         try
         {
-            return await client.CreateOrderAsync(
-                [.. identifiers.Select(CreateIdentifier)],
-                _options.Profile,
-                hint,
-                cancellationToken);
-        }
-        catch (AcmeException ex) when (hint is not null && IsRenewalRefused(ex))
-        {
-            if (ex.ErrorType == AcmeErrorTypes.AlreadyReplaced)
+            try
             {
-                Log.CertificateAlreadyReplaced(_logger, ex.Detail ?? ex.Message);
+                return await client.CreateOrderAsync(
+                    [.. identifiers.Select(CreateIdentifier)],
+                    _options.Profile,
+                    hint,
+                    cancellationToken);
             }
-            else
+            catch (AcmeException ex) when (hint is not null && IsRenewalRefused(ex))
             {
-                Log.RenewalNotAccepted(_logger, ex.Detail ?? ex.Message);
-            }
+                if (ex.ErrorType == AcmeErrorTypes.AlreadyReplaced)
+                {
+                    Log.CertificateAlreadyReplaced(_logger, ex.Detail ?? ex.Message);
+                }
+                else
+                {
+                    Log.RenewalNotAccepted(_logger, ex.Detail ?? ex.Message);
+                }
 
-            return await client.CreateOrderAsync(
-                [.. identifiers.Select(CreateIdentifier)],
-                _options.Profile,
-                replaces: null,
-                cancellationToken);
+                return await client.CreateOrderAsync(
+                    [.. identifiers.Select(CreateIdentifier)],
+                    _options.Profile,
+                    replaces: null,
+                    cancellationToken);
+            }
+        }
+        catch (AcmeException ex) when (ex.ErrorType == AcmeErrorTypes.InvalidProfile)
+        {
+            // The authority's own words name the problem but not the setting behind it.
+            throw new AcmeException(
+                $"The certificate authority refused the '{_options.Profile}' certificate profile: {ex.Detail ?? ex.Message} " +
+                $"Check AutoHttpsOptions.Profile.",
+                ex.ErrorType,
+                ex.Detail,
+                ex.StatusCode);
         }
     }
 
     // A refusal of the order itself, as opposed to a request the authority could not process at all.
-    // A rate limit or a stale nonce has nothing to do with the field, and an unknown account has to
-    // reach the re-registration in AcquireAsync.
+    // A rate limit or a stale nonce has nothing to do with the field, an unknown account has to reach
+    // the re-registration in AcquireAsync, and a refused profile is refused with or without it.
     internal static bool IsRenewalRefused(AcmeException exception) =>
         exception is not AcmeRateLimitException &&
         exception.StatusCode is >= 400 and < 500 &&
-        exception.ErrorType is not (AcmeErrorTypes.BadNonce or AcmeErrorTypes.AccountDoesNotExist);
+        exception.ErrorType is not (AcmeErrorTypes.BadNonce or AcmeErrorTypes.AccountDoesNotExist or AcmeErrorTypes.InvalidProfile);
 
     private async Task<string> SelectChainAsync(AcmeClient client, Uri certificateUrl, CancellationToken cancellationToken)
     {

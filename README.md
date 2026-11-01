@@ -135,7 +135,7 @@ The quick start covers the common case. These are the rest:
 | `EmailAddress` | *(none)* | Contact registered with the authority. Optional: without one the account is registered with no contact, which RFC 8555 allows, and Let's Encrypt has stored no contact address since June 2025. Changing it later, including setting or removing it, registers a new account, and the next renewal is ordered without the renewal hint, because the authority does not accept a renewal of the previous account's certificate. |
 | `AcceptTermsOfService` | `false` | Must be `true`. Startup fails otherwise. |
 | `CertificateAuthority` | Let's Encrypt | The ACME directory URL. |
-| `Profile` | *(none)* | Certificate profile to request, e.g. `shortlived`. A change applies from the next renewal. |
+| `Profile` | *(none)* | Certificate profile to request, e.g. `shortlived`. A change applies from the next renewal, or at once with `RenewAsync`. A profile the directory does not list is refused before ordering, and one the authority refuses (`invalidProfile`) fails the order with a message naming this option. |
 | `KeyAlgorithm` | `EcdsaP256` | Key type for issued certificates. A change replaces the certificate in use straight away. |
 | `PreferredChain` | *(none)* | Root common name the served chain should lead up to, when the authority offers more than one. A change applies from the next renewal. |
 | `StorageDirectory` | local app data | Where certificates and the account key live. |

@@ -155,6 +155,10 @@ internal sealed class TestCaBehavior
 
     public bool AdvertiseProfiles { get; set; } = true;
 
+    /// <summary>Refuses an unknown profile with invalidProfile even while the directory does not list
+    /// its profiles, as draft-ietf-acme-profiles -03 requires of a server that rejects a profile.</summary>
+    public bool RejectUnknownProfiles { get; set; }
+
     public bool RequireExternalAccountBinding { get; set; }
 
     public byte[]? ExternalAccountHmacKey { get; set; }
