@@ -45,6 +45,7 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     private int _requestCount;
     private int _orderCount;
     private int _orderAttempts;
+    private int _sawContactField;
     private int _sawReplaces;
     private int _refusedReplaces;
     private int _accountLookups;
@@ -105,6 +106,13 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
     public IReadOnlyList<DateTimeOffset> AuthorizationPollTimes => _authorizationPollTimes.ToArray();
 
     public int AccountCount => _accounts.Count;
+
+    /// <summary>The contact URLs each account registered with.</summary>
+    public IReadOnlyList<IReadOnlyList<string>> AccountContacts =>
+        [.. _accounts.Values.Select(account => (IReadOnlyList<string>)[.. account.Contacts])];
+
+    /// <summary>Whether any newAccount request carried a contact field at all, empty or not.</summary>
+    public bool SawContactField => Volatile.Read(ref _sawContactField) == 1;
 
     public IReadOnlyCollection<TestIssuedCertificate> IssuedCertificates => _certificates.Values.ToArray();
 
@@ -325,9 +333,14 @@ internal sealed class TestCertificateAuthority : IAsyncDisposable
             Thumbprint = thumbprint,
         };
 
-        if (root.TryGetProperty("contact", out JsonElement contacts) && contacts.ValueKind == JsonValueKind.Array)
+        if (root.TryGetProperty("contact", out JsonElement contacts))
         {
-            account.Contacts.AddRange(contacts.EnumerateArray().Select(c => c.GetString() ?? string.Empty));
+            Volatile.Write(ref _sawContactField, 1);
+
+            if (contacts.ValueKind == JsonValueKind.Array)
+            {
+                account.Contacts.AddRange(contacts.EnumerateArray().Select(c => c.GetString() ?? string.Empty));
+            }
         }
 
         _accounts[account.Id] = account;

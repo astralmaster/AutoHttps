@@ -58,6 +58,16 @@ public class StoreKeyTests
     }
 
     [Fact]
+    public void ForAccount_KeepsTheNameItHasAlwaysHadForAnEmailAddress()
+    {
+        // The account key is found by this name. A different name after an upgrade would register a new
+        // account and drop the renewal hint for every stored certificate, so the value is pinned.
+        Assert.Equal(
+            "account-ab1ce89e57e2",
+            StoreKey.ForAccount(new Uri("https://acme-v02.api.letsencrypt.org/directory"), "admin@example.com"));
+    }
+
+    [Fact]
     public void ForAccount_SeparatesAuthoritiesAndContacts()
     {
         var authority = new Uri("https://acme.example.com/directory");

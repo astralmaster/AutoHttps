@@ -36,13 +36,18 @@ public class OptionsValidatorTests
         AssertFails(options, "not a domain");
     }
 
-    [Fact]
-    public void TheEmailAddressIsRequired()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void TheEmailAddressIsOptional(string? emailAddress)
     {
+        // RFC 8555 makes the contact optional, and Let's Encrypt has stored no contact address since
+        // June 2025, so requiring one only made people invent an address.
         AutoHttpsOptions options = Valid();
-        options.EmailAddress = null;
+        options.EmailAddress = emailAddress;
 
-        AssertFails(options, "EmailAddress");
+        Assert.True(new AutoHttpsOptionsValidator().Validate(null, options).Succeeded);
     }
 
     [Theory]
@@ -343,7 +348,8 @@ public class OptionsValidatorTests
     [Fact]
     public void EveryProblemIsReportedAtOnce()
     {
-        var options = new AutoHttpsOptions();
+        // No names, the agreement not accepted, and a malformed address.
+        var options = new AutoHttpsOptions { EmailAddress = "not-an-address" };
 
         ValidateOptionsResult result = _validator.Validate(null, options);
 

@@ -132,7 +132,7 @@ The quick start covers the common case. These are the rest:
 | Option | Default | What it does |
 |---|---|---|
 | `DomainNames` | *(required)* | Domains to request. A `*.` entry needs `DnsChallengeProvider`. |
-| `EmailAddress` | *(required)* | Contact registered with the authority. Changing it later registers a new account, and the next renewal is ordered without the renewal hint, because the authority does not accept a renewal of the previous account's certificate. |
+| `EmailAddress` | *(none)* | Contact registered with the authority. Optional: without one the account is registered with no contact, which RFC 8555 allows, and Let's Encrypt has stored no contact address since June 2025. Changing it later, including setting or removing it, registers a new account, and the next renewal is ordered without the renewal hint, because the authority does not accept a renewal of the previous account's certificate. |
 | `AcceptTermsOfService` | `false` | Must be `true`. Startup fails otherwise. |
 | `CertificateAuthority` | Let's Encrypt | The ACME directory URL. |
 | `Profile` | *(none)* | Certificate profile to request, e.g. `shortlived`. A change applies from the next renewal. |

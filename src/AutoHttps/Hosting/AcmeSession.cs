@@ -63,7 +63,7 @@ internal sealed class AcmeSession : IDisposable
                 if (!(_keyFromStore && await FindAccountAsync(client, cancellationToken)))
                 {
                     await client.RegisterAccountAsync(
-                        [BuildContact(_options.EmailAddress!)],
+                        EmailAddress is { } emailAddress ? [BuildContact(emailAddress)] : [],
                         _options.AcceptTermsOfService,
                         _options.ExternalAccountBinding,
                         cancellationToken);
@@ -173,7 +173,10 @@ internal sealed class AcmeSession : IDisposable
         Log.AccountInUse(_logger, accountUrl, _options.CertificateAuthority);
     }
 
-    private string AccountKeyName => StoreKey.ForAccount(_options.CertificateAuthority, _options.EmailAddress ?? string.Empty);
+    // Named after the address as configured, so setups that have one keep the name they always had.
+    private string AccountKeyName => StoreKey.ForAccount(_options.CertificateAuthority, EmailAddress ?? string.Empty);
+
+    private string? EmailAddress => string.IsNullOrWhiteSpace(_options.EmailAddress) ? null : _options.EmailAddress;
 
     private static string BuildContact(string emailAddress) =>
         emailAddress.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) ? emailAddress : "mailto:" + emailAddress;

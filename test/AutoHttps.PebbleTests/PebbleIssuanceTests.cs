@@ -492,6 +492,25 @@ public class PebbleIssuanceTests
     }
 
     [Fact]
+    public async Task IssuesWithAnAccountThatHasNoEmailAddress()
+    {
+        using var storage = new TempStorage();
+        string domain = NewDomain();
+
+        await using PebbleApplication app = await PebbleApplication.StartAsync(_pebble, options =>
+        {
+            options.DomainNames.Add(domain);
+            options.StorageDirectory = storage.Path;
+            options.EmailAddress = null;
+        });
+
+        await app.WaitForCertificateAsync(domain, Timeout);
+
+        Assert.True(await app.HandshakeIsTrustedAsync(domain, _pebble.PebbleRoot));
+        Assert.NotNull(app.Services.GetRequiredService<IAutoHttpsCertificateInspector>().GetStatus().AccountUrl);
+    }
+
+    [Fact]
     public async Task ReplacesTheCertificateOnDemandAndRevokesThePreviousOne()
     {
         using var storage = new TempStorage();

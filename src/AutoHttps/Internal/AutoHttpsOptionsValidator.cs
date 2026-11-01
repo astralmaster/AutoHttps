@@ -46,11 +46,8 @@ internal sealed class AutoHttpsOptionsValidator : IValidateOptions<AutoHttpsOpti
             hasWildcard |= DomainNormalizer.IsWildcard(normalized);
         }
 
-        if (string.IsNullOrWhiteSpace(options.EmailAddress))
-        {
-            failures.Add($"{nameof(AutoHttpsOptions.EmailAddress)} is required. Certificate authorities use it to contact you about your account.");
-        }
-        else if (!IsPlausibleEmail(options.EmailAddress))
+        // Optional (RFC 8555 section 7.3), but an address that is set has to be one.
+        if (!string.IsNullOrWhiteSpace(options.EmailAddress) && !IsPlausibleEmail(options.EmailAddress))
         {
             failures.Add($"'{options.EmailAddress}' is not a valid email address.");
         }

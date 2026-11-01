@@ -16,8 +16,9 @@ public sealed class AutoHttpsOptions
     public IList<string> DomainNames { get; } = [];
 
     /// <summary>
-    /// The contact address registered with the certificate authority. Used for account recovery and,
-    /// at some authorities, for problem notifications.
+    /// The contact address registered with the certificate authority, or <see langword="null"/> to
+    /// register the account without one, which RFC 8555 allows. Some authorities use it for problem
+    /// notifications. Let's Encrypt has stored no contact address since June 2025.
     /// </summary>
     /// <remarks>
     /// The stored ACME account is keyed by this address together with the authority, so changing it,

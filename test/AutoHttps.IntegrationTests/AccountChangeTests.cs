@@ -79,6 +79,44 @@ public sealed class AccountChangeTests
     }
 
     [Fact]
+    public async Task WithoutAnEmailAddressTheAccountIsRegisteredWithNoContact()
+    {
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        string original;
+        await using (TestApplication first = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+            options.EmailAddress = null;
+        }))
+        {
+            original = (await first.WaitForCertificateAsync("app.example.com", IssuanceTimeout)).Leaf.Thumbprint;
+        }
+
+        // The field is left out rather than sent empty, as RFC 8555 section 7.3 allows.
+        Assert.False(authority.SawContactField);
+        Assert.Empty(Assert.Single(authority.AccountContacts));
+
+        // And the account key is found again on the next start, so no second account appears.
+        foreach (string file in Directory.GetFiles(storage.Path, "*.crt.pem"))
+        {
+            File.Delete(file);
+        }
+
+        await using TestApplication second = await TestApplication.StartAsync(authority, options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+            options.EmailAddress = null;
+        });
+
+        await second.WaitForCertificateChangeAsync("app.example.com", original, IssuanceTimeout);
+        Assert.Equal(1, authority.AccountCount);
+    }
+
+    [Fact]
     public async Task TheAccountUrlIsShownByTheInspectorAndLoggedOnce()
     {
         using var storage = new TempStorage();

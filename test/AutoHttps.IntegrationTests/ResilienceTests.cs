@@ -353,13 +353,17 @@ public class ResilienceTests
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(System.Net.IPAddress.Loopback, 0));
 
-        builder.Services.AddAutoHttps(options => options.DomainNames.Add("example.com"));
+        builder.Services.AddAutoHttps(options =>
+        {
+            options.DomainNames.Add("example.com");
+            options.EmailAddress = "not-an-address";
+        });
 
         // Attaching to Kestrel forces the options to be read while the host is being constructed, so
         // a misconfigured application fails before it binds a port, and reports every problem at once.
         OptionsValidationException exception = Assert.Throws<OptionsValidationException>(() => builder.Build());
 
-        Assert.Contains(exception.Failures, f => f.Contains("EmailAddress", StringComparison.Ordinal));
+        Assert.Contains(exception.Failures, f => f.Contains("not a valid email address", StringComparison.Ordinal));
         Assert.Contains(exception.Failures, f => f.Contains("AcceptTermsOfService", StringComparison.Ordinal));
     }
 
