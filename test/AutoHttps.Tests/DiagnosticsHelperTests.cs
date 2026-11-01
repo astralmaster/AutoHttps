@@ -260,18 +260,60 @@ public class DnsLookupParsingTests
         Assert.Null(result);
     }
 
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("\"blocked\"")]
+    public async Task JsonThatIsNotADnsAnswerReadsAsNoAnswerRatherThanThrowing(string body)
+    {
+        var lookup = new DnsLookup(new HtmlFactory(body, "application/json"));
+
+        DnsLookupResult? result = await lookup.QueryAsync(
+            new Uri("https://dns.example.com/resolve"), "app.example.com", DnsRecordType.A, System.Threading.CancellationToken.None);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void AnAnswerEntryThatIsNotAnObjectIsSkipped()
+    {
+        DnsLookupResult result = DnsLookup.Parse(
+            """{ "Status": 0, "Answer": [ 1, null, { "type": 1, "data": "203.0.113.5" } ] }""",
+            DnsRecordType.A);
+
+        Assert.Equal(["203.0.113.5"], result.Records);
+    }
+
     private sealed class HtmlFactory : System.Net.Http.IHttpClientFactory
     {
-        public System.Net.Http.HttpClient CreateClient(string name) => new(new HtmlHandler());
+        private readonly string _body;
+        private readonly string _mediaType;
 
-        private sealed class HtmlHandler : System.Net.Http.HttpMessageHandler
+        public HtmlFactory(string body = "<html>not dns</html>", string mediaType = "text/html")
         {
+            _body = body;
+            _mediaType = mediaType;
+        }
+
+        public System.Net.Http.HttpClient CreateClient(string name) => new(new FixedHandler(_body, _mediaType));
+
+        private sealed class FixedHandler : System.Net.Http.HttpMessageHandler
+        {
+            private readonly string _body;
+            private readonly string _mediaType;
+
+            public FixedHandler(string body, string mediaType)
+            {
+                _body = body;
+                _mediaType = mediaType;
+            }
+
             protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(
                 System.Net.Http.HttpRequestMessage request,
                 System.Threading.CancellationToken cancellationToken) =>
                 Task.FromResult(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
                 {
-                    Content = new System.Net.Http.StringContent("<html>not dns</html>", System.Text.Encoding.UTF8, "text/html"),
+                    Content = new System.Net.Http.StringContent(_body, System.Text.Encoding.UTF8, _mediaType),
                 });
         }
     }

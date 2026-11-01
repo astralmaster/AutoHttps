@@ -118,7 +118,10 @@ internal sealed class DnsPropagationChecker
     {
         using JsonDocument document = JsonDocument.Parse(json);
 
-        if (!document.RootElement.TryGetProperty("Answer", out JsonElement answers) ||
+        // JSON of another shape, such as a filtering proxy's [] or "blocked", is no answer. Reading a
+        // property of anything but an object throws.
+        if (document.RootElement.ValueKind != JsonValueKind.Object ||
+            !document.RootElement.TryGetProperty("Answer", out JsonElement answers) ||
             answers.ValueKind != JsonValueKind.Array)
         {
             return false;
@@ -126,6 +129,11 @@ internal sealed class DnsPropagationChecker
 
         foreach (JsonElement answer in answers.EnumerateArray())
         {
+            if (answer.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
             if (answer.TryGetProperty("type", out JsonElement type) &&
                 type.ValueKind == JsonValueKind.Number &&
                 (!type.TryGetInt32(out int number) || number != TxtRecordType))

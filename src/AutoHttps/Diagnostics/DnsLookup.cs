@@ -83,6 +83,13 @@ internal sealed class DnsLookup
     {
         using JsonDocument document = JsonDocument.Parse(json);
 
+        // JSON of another shape, such as a filtering proxy's [] or "blocked", is not an answer in the DNS
+        // JSON format, which QueryAsync reports the same way as one that is not JSON at all.
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("The resolver's answer is not a DNS JSON object.");
+        }
+
         int status = document.RootElement.TryGetProperty("Status", out JsonElement statusElement) &&
             statusElement.ValueKind == JsonValueKind.Number &&
             statusElement.TryGetInt32(out int code)
@@ -98,6 +105,11 @@ internal sealed class DnsLookup
         {
             foreach (JsonElement answer in answers.EnumerateArray())
             {
+                if (answer.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
                 // A resolver may return other types for the same name, for example a CNAME alongside the
                 // address it resolves to, so the answers are filtered to the type that was asked for.
                 if (answer.TryGetProperty("type", out JsonElement recordType) &&

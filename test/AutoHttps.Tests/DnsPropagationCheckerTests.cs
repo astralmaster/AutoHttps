@@ -114,6 +114,26 @@ public sealed class DnsPropagationCheckerTests
         Assert.True(handler.Calls > 1, "The checker should have kept polling until the timeout.");
     }
 
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("\"blocked\"")]
+    [InlineData("""{"Answer":[1,"x",null]}""")]
+    public void ContainsValueIsFalseForJsonThatIsNotADnsAnswer(string json)
+    {
+        // A filtering proxy, or a resolver URL with the wrong path, can answer 200 with JSON of another
+        // shape. Reading a property of it threw, which failed the order this check promises never to block.
+        Assert.False(DnsPropagationChecker.ContainsValue(json, "the-value"));
+    }
+
+    [Fact]
+    public void ContainsValueSkipsAnAnswerEntryThatIsNotAnObject()
+    {
+        string json = """{"Answer":[1,{"type":16,"data":"\"the-value\""}]}""";
+
+        Assert.True(DnsPropagationChecker.ContainsValue(json, "the-value"));
+    }
+
     [Fact]
     public void ContainsValueSkipsAnAnswerWhoseTypeIsNotAnInteger()
     {
