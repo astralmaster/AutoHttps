@@ -19,7 +19,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/astralmaster/AutoHttps</PackageProjectUrl>
-    <VersionPrefix>1.8.0</VersionPrefix>
+    <VersionPrefix>1.9.0</VersionPrefix>
   </PropertyGroup>
 
   <!-- A .snupkg next to each .nupkg, so a debugger can step into the library from nuget.org's symbol
