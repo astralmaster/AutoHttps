@@ -100,6 +100,43 @@ public sealed class RenewOnDemandTests
     }
 
     [Fact]
+    public async Task EveryInstanceAskedToReplaceEndsOnOneNewCertificate()
+    {
+        // The documented way to move every instance off a compromised certificate at once: ask each of
+        // them. They share the store and its lock, so one orders and the others take what it stored.
+        // Validation goes through DNS, because the test authority sends http-01 requests to whichever
+        // test application started last, which is not necessarily the one that orders.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+        var dns = new DelegateDnsChallengeProvider(
+            (name, value, _) => { authority.Dns.Add(name, value); return Task.CompletedTask; },
+            (name, value, _) => { authority.Dns.Remove(name, value); return Task.CompletedTask; });
+
+        Action<AutoHttpsOptions> configure = options =>
+        {
+            options.DomainNames.Add("app.example.com");
+            options.StorageDirectory = storage.Path;
+            options.PreferredChallengeType = "dns-01";
+            options.DnsChallengeProvider = dns;
+        };
+
+        await using TestApplication first = await TestApplication.StartAsync(authority, configure);
+        string original = (await first.WaitForCertificateAsync("app.example.com", IssuanceTimeout)).Leaf.Thumbprint;
+        await using TestApplication second = await TestApplication.StartAsync(authority, configure);
+        Assert.Equal(original, (await second.WaitForCertificateAsync("app.example.com", IssuanceTimeout)).Leaf.Thumbprint);
+
+        await Task.WhenAll(
+            Manager(first).RenewAsync(RevocationReason.KeyCompromise),
+            Manager(second).RenewAsync(RevocationReason.KeyCompromise)).WaitAsync(TimeSpan.FromSeconds(90));
+
+        string replacement = first.FindCertificate("app.example.com")!.Leaf.Thumbprint;
+        Assert.NotEqual(original, replacement);
+        Assert.Equal(replacement, second.FindCertificate("app.example.com")!.Leaf.Thumbprint);
+        Assert.Equal(2, authority.OrderCount);
+        Assert.Equal((int)RevocationReason.KeyCompromise, authority.Revocations[original]);
+    }
+
+    [Fact]
     public async Task AFailedRenewalFaultsTheCallAndDoesNotKeepOrdering()
     {
         using var storage = new TempStorage();

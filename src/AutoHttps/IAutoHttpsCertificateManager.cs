@@ -30,7 +30,10 @@ public interface IAutoHttpsCertificateManager
     /// the order's exception, an <see cref="AcmeRateLimitException"/> while the authority has asked to
     /// wait, and the certificate in use stays until its ordinary renewal. Several calls made together
     /// share one order. Instances that share the certificate store pick the new certificate up at their
-    /// next check, within <see cref="AutoHttpsOptions.RenewalCheckInterval"/>.
+    /// next check, within <see cref="AutoHttpsOptions.RenewalCheckInterval"/>, and until then they still
+    /// serve the one this call revokes. To move every instance at once, make this call on each of them:
+    /// the first orders, the others take the certificate it stored within half a minute of it being
+    /// there, and a certificate already revoked counts as revoked.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// AutoHttps orders nothing in this process, because a development certificate is being served.

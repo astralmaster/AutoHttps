@@ -858,8 +858,11 @@ call fails with the order's exception, an `AcmeRateLimitException` while the aut
 and the certificate in use stays until its ordinary renewal. The order counts against the authority's
 limits like any other: Let's Encrypt allows 5 certificates for the same names a week. Instances that
 share the certificate store switch to the new certificate at their next check (see
-[Running several instances](#running-several-instances)). In Development, while a development certificate
-is served, there is nothing to replace and the call throws.
+[Running several instances](#running-several-instances)), and until then they still serve the certificate
+the call revoked, for up to `RenewalCheckInterval`, 6 hours by default. To move every instance at once,
+make the call on each of them: the first orders, the others take the certificate it stored within half
+a minute of it being there, and the one revocation that lands is enough for all of them. In Development, while a development
+certificate is served, there is nothing to replace and the call throws.
 
 To revoke without replacing, for example when decommissioning a certificate:
 
