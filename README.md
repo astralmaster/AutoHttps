@@ -229,7 +229,8 @@ certificate with no key. Files are `0600` on Unix. Certificates for domains you 
 deleted; prune the directory yourself if that matters.
 
 Changing `DomainNames` does not take the names that stayed offline. AutoHttps keeps a copy of the most
-recent certificate from each authority (the `latest-` files), serves it for the names it still covers,
+recent certificate from each authority for each application (the `latest-` files, named after the
+authority and `IHostEnvironment.ApplicationName`), serves it for the names it still covers,
 and orders one for the new set straight away. A name that was added gets the self-signed fallback until
 that order succeeds, and the health check reports `Degraded` meanwhile. After a name is removed, the
 current certificate still covers the rest, so it is kept until its ordinary renewal.

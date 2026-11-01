@@ -135,8 +135,9 @@ public sealed class DomainChangeTests
     [Fact]
     public async Task ACopyCoveringNoneOfTheConfiguredNamesIsNotServed()
     {
-        // Several applications on one host share the default storage directory, and so the copy. One
-        // whose names are all different must not pick up another's certificate.
+        // Two deployments of one application, or two applications with the same name, share the copy when
+        // they share a storage directory. One whose names are all different must not pick up the
+        // other's certificate.
         using var storage = new TempStorage();
         await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
 
@@ -148,6 +149,30 @@ public sealed class DomainChangeTests
         Assert.Equal(["app.example.com"], own.SubjectNames.ToArray());
         Assert.Equal(0, app.Log.CountOf(PreviousCertificateServed));
         Assert.Equal(2, authority.OrderCount);
+    }
+
+    [Fact]
+    public async Task ApplicationsSharingAStorageDirectoryKeepTheirOwnCopy()
+    {
+        // The default storage directory is shared by every application of the same user. A copy kept per
+        // authority alone held whichever application wrote it last, so the other one found nothing of its
+        // own after its names changed and served the fallback for the names that stayed.
+        using var storage = new TempStorage();
+        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
+
+        string original = await IssueForApplicationAsync(authority, storage, "first", "app.example.com");
+        await IssueForApplicationAsync(authority, storage, "second", "other.example.com");
+
+        authority.Behavior.UnreachableNames["new.example.com"] = 0;
+
+        await using TestApplication changed = await TestApplication.StartAsync(
+            authority,
+            Configure(storage, "app.example.com", "new.example.com"),
+            applicationName: "first");
+
+        ServerCertificate kept = await changed.WaitForCertificateAsync("app.example.com", TimeSpan.FromSeconds(10));
+        Assert.Equal(original, kept.Leaf.Thumbprint);
+        Assert.True(changed.Log.CountOf(PreviousCertificateServed) > 0, changed.Log.Describe());
     }
 
     [Fact]
@@ -176,9 +201,17 @@ public sealed class DomainChangeTests
         Assert.Equal(2, authority.OrderCount);
     }
 
-    private static async Task<string> IssueAsync(TestCertificateAuthority authority, TempStorage storage, params string[] names)
+    private static Task<string> IssueAsync(TestCertificateAuthority authority, TempStorage storage, params string[] names) =>
+        IssueForApplicationAsync(authority, storage, applicationName: null, names);
+
+    private static async Task<string> IssueForApplicationAsync(
+        TestCertificateAuthority authority,
+        TempStorage storage,
+        string? applicationName,
+        params string[] names)
     {
-        await using TestApplication first = await TestApplication.StartAsync(authority, Configure(storage, names));
+        await using TestApplication first = await TestApplication.StartAsync(
+            authority, Configure(storage, names), applicationName: applicationName);
         return (await first.WaitForCertificateAsync(names[0], IssuanceTimeout)).Leaf.Thumbprint;
     }
 

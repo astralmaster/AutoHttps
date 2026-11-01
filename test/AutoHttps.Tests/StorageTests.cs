@@ -69,19 +69,21 @@ public class StoreKeyTests
     }
 
     [Fact]
-    public void ForLatest_IsPerAuthorityAndCannotCollideWithACertificateName()
+    public void ForLatest_IsPerAuthorityAndApplicationAndCannotCollideWithACertificateName()
     {
         // The copy is read back after the configured names change, so it must not depend on them, and
-        // a staging copy must never be read back in production.
+        // a staging copy must never be read back in production. Every application of the same user
+        // shares the default storage directory, so one must not overwrite another's copy either.
         var staging = new Uri("https://acme-staging-v02.api.letsencrypt.org/directory");
         var production = new Uri("https://acme-v02.api.letsencrypt.org/directory");
 
-        Assert.Equal(StoreKey.ForLatest(production), StoreKey.ForLatest(production));
-        Assert.NotEqual(StoreKey.ForLatest(staging), StoreKey.ForLatest(production));
+        Assert.Equal(StoreKey.ForLatest(production, "Shop"), StoreKey.ForLatest(production, "Shop"));
+        Assert.NotEqual(StoreKey.ForLatest(staging, "Shop"), StoreKey.ForLatest(production, "Shop"));
+        Assert.NotEqual(StoreKey.ForLatest(production, "Shop"), StoreKey.ForLatest(production, "Blog"));
 
         // A certificate name starts with its first domain, and no domain has the "latest-" form with a
         // hash after it, because a hash is not a valid top-level domain.
-        string latest = StoreKey.ForLatest(production);
+        string latest = StoreKey.ForLatest(production, "Shop");
         Assert.StartsWith("latest-", latest, StringComparison.Ordinal);
         Assert.NotEqual(latest, StoreKey.ForCertificate(production, ["latest"]));
         Assert.Equal(-1, latest.IndexOfAny(Path.GetInvalidFileNameChars()));

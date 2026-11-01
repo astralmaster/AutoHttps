@@ -162,7 +162,7 @@ internal sealed class AutoHttpsService : BackgroundService
 
         _domains = domains;
         _storeName = storeName;
-        _latestName = StoreKey.ForLatest(_options.CertificateAuthority);
+        _latestName = StoreKey.ForLatest(_options.CertificateAuthority, _environment.ApplicationName);
         _state.SetDomains(domains);
 
         if (_options.ServeFallbackCertificate)

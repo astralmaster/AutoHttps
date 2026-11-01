@@ -68,9 +68,15 @@ internal sealed class TestApplication : IAsyncDisposable
         bool tuneHandshakeTimeout = true,
         string environment = "Production",
         Action<IAutoHttpsBuilder>? configureBuilder = null,
-        HttpProtocols? protocols = null)
+        HttpProtocols? protocols = null,
+        string? applicationName = null)
     {
-        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { EnvironmentName = environment });
+        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = environment,
+            ApplicationName = applicationName,
+        });
+
         builder.Logging.ClearProviders();
         builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
