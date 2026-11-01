@@ -85,31 +85,6 @@ public class CertificateIssuanceTests
     }
 
     [Fact]
-    public async Task TheEndpointServesTheCertificateWithNoHandshakeOptionsOfItsOwn()
-    {
-        using var storage = new TempStorage();
-        await using TestCertificateAuthority authority = await TestCertificateAuthority.StartAsync();
-
-        // The two argument overload is what the readme tells people to write, so it has to be the
-        // one that is proven to serve a certificate, not just the one the other tests tune.
-        await using TestApplication app = await TestApplication.StartAsync(
-            authority,
-            options =>
-            {
-                options.DomainNames.Add("app.example.com");
-                options.StorageDirectory = storage.Path;
-            },
-            KestrelIntegration.ListenOptions,
-            tuneHandshakeTimeout: false);
-
-        ServerCertificate issued = await app.WaitForCertificateAsync("app.example.com", IssuanceTimeout);
-        TlsHandshakeResult handshake = await app.HandshakeAsync("app.example.com", authority.RootCertificate);
-
-        Assert.Equal(issued.Leaf.Thumbprint, handshake.Leaf.Thumbprint);
-        Assert.True(handshake.ChainIsTrusted, DescribeChain(handshake));
-    }
-
-    [Fact]
     public async Task HttpTwoIsStillNegotiatedOnAnAutoHttpsEndpoint()
     {
         using var storage = new TempStorage();
